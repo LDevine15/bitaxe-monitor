@@ -167,11 +167,21 @@ class BitaxeLogger:
         else:
             eff_indicator = "🔴"  # Poor
 
+        # Format power with color coding
+        # ANSI color codes: Yellow=\033[93m, Red=\033[91m, Reset=\033[0m
+        power = info.power
+        if power >= 25:
+            power_str = f"\033[91m{power:.1f}W\033[0m"  # Red for 25W+
+        elif power >= 24:
+            power_str = f"\033[93m{power:.1f}W\033[0m"  # Yellow for 24-25W
+        else:
+            power_str = f"{power:.1f}W"  # Normal
+
         logger.info(
             f"{device_name}: "
             f"{info.hashRate:.1f} GH/s | "
             f"{info.temp:.1f}°C | "
-            f"{info.power:.1f}W | "
+            f"{power_str} | "
             f"{eff_indicator} {jth:.1f} J/TH | "
             f"{info.frequency}MHz@{info.coreVoltage}mV"
         )
