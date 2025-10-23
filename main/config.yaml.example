@@ -1,0 +1,33 @@
+# Bitaxe Monitor Configuration
+# Copy this file to config.yaml and update with your device IPs
+
+devices:
+  - name: "bitaxe-1"
+    ip: "192.168.1.100"        # Replace with your Bitaxe IP
+    enabled: true
+
+  - name: "bitaxe-2"
+    ip: "192.168.1.101"        # Replace with your Bitaxe IP
+    enabled: true
+
+logging:
+  poll_interval: 30            # Seconds between polls
+  database_path: "./data/metrics.db"
+  log_level: "INFO"            # DEBUG, INFO, WARNING, ERROR
+
+safety:
+  max_temp_warning: 65         # °C - Log warning
+  max_temp_shutdown: 70        # °C - Emergency alert
+  min_hashrate_warning: 400    # GH/s - Alert if hashrate drops
+
+# Optional: Email/Slack alerts (future feature)
+# alerts:
+#   email:
+#     enabled: false
+#     smtp_server: "smtp.gmail.com"
+#     smtp_port: 587
+#     from_addr: "alerts@example.com"
+#     to_addr: "you@example.com"
+#   slack:
+#     enabled: false
+#     webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"

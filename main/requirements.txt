@@ -1,0 +1,24 @@
+# Core Dependencies
+aiohttp>=3.9.0              # Async HTTP client for API calls
+pyyaml>=6.0                 # YAML config file parsing
+pydantic>=2.0               # Data validation and models
+python-dotenv>=1.0          # Environment variable management
+
+# Data Analysis
+pandas>=2.0                 # Data manipulation and analysis
+numpy>=1.24                 # Numerical operations
+
+# Visualization
+matplotlib>=3.7             # Static plots
+plotly>=5.17                # Interactive plots
+
+# CLI & Terminal UI
+rich>=13.0                  # Beautiful terminal output
+click>=8.1                  # CLI framework
+
+# Optional Dependencies (uncomment as needed)
+# textual>=0.40             # Advanced TUI framework
+# flask>=3.0                # Web dashboard
+# prometheus_client>=0.18   # Metrics export
+# pytest>=7.4               # Testing framework
+# pytest-asyncio>=0.21      # Async test support
