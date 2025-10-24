@@ -29,6 +29,22 @@ class Database:
         self.init_schema()
         logger.info(f"Database initialized at {db_path}")
 
+    def migrate_schema(self):
+        """Apply schema migrations for existing databases."""
+        cursor = self.conn.cursor()
+
+        # Check if best_diff column exists
+        cursor.execute("PRAGMA table_info(performance_metrics)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        # Add difficulty columns if they don't exist
+        if 'best_diff' not in columns:
+            logger.info("Migrating database: Adding difficulty tracking columns...")
+            cursor.execute("ALTER TABLE performance_metrics ADD COLUMN best_diff REAL")
+            cursor.execute("ALTER TABLE performance_metrics ADD COLUMN best_session_diff REAL")
+            self.conn.commit()
+            logger.info("Database migration completed successfully")
+
     def init_schema(self):
         """Initialize database schema with tables and indexes."""
         cursor = self.conn.cursor()
@@ -79,6 +95,9 @@ class Database:
                 efficiency_jth REAL,
                 efficiency_ghw REAL,
 
+                best_diff REAL,
+                best_session_diff REAL,
+
                 FOREIGN KEY (device_id) REFERENCES devices(id),
                 FOREIGN KEY (config_id) REFERENCES clock_configs(id)
             )
@@ -114,6 +133,9 @@ class Database:
 
         self.conn.commit()
         logger.debug("Database schema initialized")
+
+        # Run migrations for existing databases
+        self.migrate_schema()
 
     def register_device(self, device_id: str, ip_address: str, hostname: str = None, model: str = None):
         """Register or update a device.
@@ -205,14 +227,16 @@ class Database:
                 hashrate, power, voltage, current,
                 asic_temp, vreg_temp, fan_speed, fan_rpm,
                 shares_accepted, shares_rejected, uptime,
-                efficiency_jth, efficiency_ghw
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                efficiency_jth, efficiency_ghw,
+                best_diff, best_session_diff
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             metric.device_id, metric.timestamp, metric.config_id,
             metric.hashrate, metric.power, metric.voltage, metric.current,
             metric.asic_temp, metric.vreg_temp, metric.fan_speed, metric.fan_rpm,
             metric.shares_accepted, metric.shares_rejected, metric.uptime,
-            metric.efficiency_jth, metric.efficiency_ghw
+            metric.efficiency_jth, metric.efficiency_ghw,
+            metric.best_diff, metric.best_session_diff
         ))
         self.conn.commit()
 

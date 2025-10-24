@@ -162,12 +162,12 @@ class Analyzer:
             )
 
         # VR overheating
-        if config_summary["max_vreg_temp"] >= 65:
+        if config_summary["max_vreg_temp"] >= 80:
             warnings.append(
                 f"🔥 VR overheating: {config_summary['max_vreg_temp']}°C "
-                f"(voltage regulator stressed)"
+                f"(critical - voltage regulator stressed)"
             )
-        elif config_summary["avg_vreg_temp"] >= 58:
+        elif config_summary["avg_vreg_temp"] >= 70:
             warnings.append(
                 f"⚠️  High VR temp: {config_summary['avg_vreg_temp']}°C avg "
                 f"(may need better cooling)"

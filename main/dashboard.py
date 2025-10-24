@@ -72,6 +72,290 @@ class BitaxeDashboard:
             return round(row[0], 1)
         return None
 
+    def get_hashrate_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
+        """Get hashrate statistics for a specific timeframe.
+
+        Args:
+            device_id: Device identifier
+            hours: Lookback period in hours
+
+        Returns:
+            Dictionary with min, max, avg, variance or None if no data
+        """
+        from datetime import timedelta
+
+        lookback_time = datetime.now() - timedelta(hours=hours)
+
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT
+                MIN(hashrate) as min_hashrate,
+                MAX(hashrate) as max_hashrate,
+                AVG(hashrate) as avg_hashrate,
+                COUNT(*) as sample_count
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+        """, (device_id, lookback_time))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None and row[3] > 0:  # Check samples exist
+            min_hr = round(row[0], 1)
+            max_hr = round(row[1], 1)
+            avg_hr = round(row[2], 1)
+            samples = row[3]
+
+            # Calculate variance percentage
+            if avg_hr > 0:
+                variance_pct = ((max_hr - min_hr) / avg_hr * 100)
+            else:
+                variance_pct = 0
+
+            return {
+                'min': min_hr,
+                'max': max_hr,
+                'avg': avg_hr,
+                'variance_pct': round(variance_pct, 1),
+                'samples': samples
+            }
+        return None
+
+    def get_bucketed_hashrate_trend(self, device_id: str, minutes: int, num_buckets: int) -> list:
+        """Get bucketed average hashrate for trend visualization.
+
+        Args:
+            device_id: Device identifier
+            minutes: Lookback period in minutes
+            num_buckets: Number of time buckets to create
+
+        Returns:
+            List of average hashrate values per bucket (most recent last)
+        """
+        from datetime import timedelta
+
+        lookback_time = datetime.now() - timedelta(minutes=minutes)
+        bucket_size_minutes = minutes / num_buckets
+
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT hashrate, timestamp
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+            ORDER BY timestamp ASC
+        """, (device_id, lookback_time))
+
+        rows = cursor.fetchall()
+        if not rows:
+            return []
+
+        # Group samples into buckets and average
+        buckets = [[] for _ in range(num_buckets)]
+        start_time = datetime.fromisoformat(rows[0][1])
+
+        for hashrate, timestamp_str in rows:
+            timestamp = datetime.fromisoformat(timestamp_str)
+            elapsed_minutes = (timestamp - start_time).total_seconds() / 60
+
+            # Determine which bucket this sample belongs to
+            bucket_idx = int(elapsed_minutes / bucket_size_minutes)
+            if bucket_idx >= num_buckets:
+                bucket_idx = num_buckets - 1
+
+            buckets[bucket_idx].append(hashrate)
+
+        # Calculate average for each bucket (skip empty buckets)
+        averages = []
+        for bucket in buckets:
+            if bucket:
+                averages.append(sum(bucket) / len(bucket))
+            elif averages:
+                # If bucket is empty but we have previous data, use last value
+                averages.append(averages[-1])
+
+        return averages
+
+    def create_hashrate_sparkline(self, hashrates: list, width: int = 40) -> str:
+        """Create a sparkline graph from hashrate data.
+
+        Args:
+            hashrates: List of hashrate values
+            width: Width of the sparkline in characters
+
+        Returns:
+            String with block characters representing the trend
+        """
+        if not hashrates or len(hashrates) < 2:
+            return "[dim]No data[/dim]"
+
+        # Sample data to fit width (take evenly spaced samples)
+        if len(hashrates) > width:
+            step = len(hashrates) / width
+            sampled = [hashrates[int(i * step)] for i in range(width)]
+        else:
+            sampled = hashrates
+
+        # Normalize to 0-8 range for block heights
+        min_hr = min(sampled)
+        max_hr = max(sampled)
+        range_hr = max_hr - min_hr
+
+        if range_hr == 0:
+            # All values the same
+            return "─" * len(sampled)
+
+        # Block characters from lowest to highest
+        blocks = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█']
+
+        graph = ""
+        for value in sampled:
+            normalized = (value - min_hr) / range_hr
+            block_idx = min(int(normalized * 8), 7)
+            graph += blocks[block_idx]
+
+        return graph
+
+    def get_total_uptime(self, device_id: str) -> Optional[Dict[str, float]]:
+        """Calculate total cumulative uptime vs current session uptime.
+
+        Detects restarts by finding where uptime decreases between consecutive polls.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dictionary with session_hours and total_hours or None if no data
+        """
+        cursor = self.db.conn.cursor()
+
+        # Get all uptime values ordered by time
+        cursor.execute("""
+            SELECT uptime, timestamp
+            FROM performance_metrics
+            WHERE device_id = ?
+            ORDER BY timestamp ASC
+        """, (device_id,))
+
+        rows = cursor.fetchall()
+        if not rows:
+            return None
+
+        # Current session uptime (latest value)
+        current_uptime = rows[-1][0]
+
+        # Calculate total uptime by detecting restarts
+        total_uptime = 0
+        prev_uptime = 0
+        session_start_idx = 0
+
+        for i, (uptime, timestamp) in enumerate(rows):
+            # Detect restart: uptime decreased
+            if uptime < prev_uptime:
+                # Add the maximum uptime from the previous session
+                session_uptimes = [rows[j][0] for j in range(session_start_idx, i)]
+                if session_uptimes:
+                    total_uptime += max(session_uptimes)
+                session_start_idx = i
+
+            prev_uptime = uptime
+
+        # Add current session uptime
+        total_uptime += current_uptime
+
+        return {
+            'session_hours': current_uptime / 3600,
+            'total_hours': total_uptime / 3600
+        }
+
+    def get_highest_difficulty(self, device_id: str) -> Optional[Dict[str, float]]:
+        """Get the highest difficulty ever achieved by this device.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dictionary with best_diff and best_session_diff or None if no data
+        """
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT
+                MAX(best_diff) as max_best_diff,
+                MAX(best_session_diff) as max_session_diff
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND best_diff IS NOT NULL
+        """, (device_id,))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return {
+                'all_time': row[0],
+                'session': row[1] if row[1] else row[0]
+            }
+        return None
+
+    def get_multi_timeframe_variance(self, device_id: str) -> Dict[str, Optional[float]]:
+        """Get variance percentages for multiple timeframes using bucketed averages.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dictionary mapping timeframe labels to variance percentages
+        """
+        timeframes = {
+            '1h': (60, 30),    # 60 minutes, 30 buckets (2-min each)
+            '4h': (240, 48),   # 4 hours, 48 buckets (5-min each)
+            '8h': (480, 48),   # 8 hours, 48 buckets (10-min each)
+            '24h': (1440, 24), # 24 hours, 24 buckets (1-hour each)
+            '3d': (4320, 36)   # 3 days, 36 buckets (2-hour each)
+        }
+
+        results = {}
+        for label, (minutes, buckets) in timeframes.items():
+            # Get bucketed averages (same as trend graphs)
+            hashrates = self.get_bucketed_hashrate_trend(device_id, minutes, buckets)
+
+            if hashrates and len(hashrates) > 1:
+                min_hr = min(hashrates)
+                max_hr = max(hashrates)
+                avg_hr = sum(hashrates) / len(hashrates)
+
+                # Calculate variance from bucketed averages
+                if avg_hr > 0:
+                    variance_pct = ((max_hr - min_hr) / avg_hr * 100)
+                else:
+                    variance_pct = 0
+
+                results[label] = {
+                    'variance': round(variance_pct, 1),
+                    'samples': len(hashrates)
+                }
+            else:
+                results[label] = None
+
+        return results
+
+    def format_difficulty(self, difficulty: float) -> str:
+        """Format difficulty value with appropriate suffix.
+
+        Args:
+            difficulty: Raw difficulty value
+
+        Returns:
+            Formatted string (e.g., "27.2 M", "1.45 G")
+        """
+        if difficulty >= 1_000_000_000_000:
+            return f"{difficulty / 1_000_000_000_000:.2f} T"
+        elif difficulty >= 1_000_000_000:
+            return f"{difficulty / 1_000_000_000:.2f} G"
+        elif difficulty >= 1_000_000:
+            return f"{difficulty / 1_000_000:.2f} M"
+        elif difficulty >= 1_000:
+            return f"{difficulty / 1_000:.2f} K"
+        else:
+            return f"{difficulty:.0f}"
+
     def create_device_panel(self, device_id: str) -> Panel:
         """Create a panel showing device status.
 
@@ -81,18 +365,29 @@ class BitaxeDashboard:
         Returns:
             Rich Panel with device information
         """
+        # Get device IP from config
+        device_config = next((d for d in self.devices if d["name"] == device_id), None)
+        device_ip = device_config["ip"] if device_config else "Unknown"
+
         latest = self.db.get_latest_metric(device_id)
 
         if not latest:
             return Panel(
                 Text("No data available", style="dim"),
-                title=f"[bold cyan]{device_id}[/bold cyan]",
+                title=f"[bold cyan]{device_id}[/bold cyan] [dim]({device_ip})[/dim]",
                 border_style="red"
             )
 
         # Get uptime and calculate average
         uptime_seconds = latest['uptime']
         avg_hashrate = self.get_uptime_average_hashrate(device_id, uptime_seconds)
+
+        # Get multi-timeframe variance
+        variance_data = self.get_multi_timeframe_variance(device_id)
+
+        # Get bucketed average hashrate trends
+        recent_hashrates_1h = self.get_bucketed_hashrate_trend(device_id, minutes=60, num_buckets=30)   # 2-min buckets
+        recent_hashrates_24h = self.get_bucketed_hashrate_trend(device_id, minutes=1440, num_buckets=24)  # 1-hour buckets
 
         # Create status table
         table = Table.grid(padding=(0, 2))
@@ -126,6 +421,27 @@ class BitaxeDashboard:
                 f"{avg_hashrate:.1f} GH/s [{avg_color}]({avg_sign}{avg_diff:.1f})[/{avg_color}]"
             )
 
+        # Hashrate trend graphs with labels
+        if len(recent_hashrates_1h) > 1:
+            sparkline_1h = self.create_hashrate_sparkline(recent_hashrates_1h, width=35)
+            min_1h = min(recent_hashrates_1h)
+            max_1h = max(recent_hashrates_1h)
+            table.add_row(
+                "Trend (1h):",
+                f"[cyan]{sparkline_1h}[/cyan] [dim]({min_1h:.0f}-{max_1h:.0f} GH/s)[/dim]"
+            )
+
+        if len(recent_hashrates_24h) > 1:
+            sparkline_24h = self.create_hashrate_sparkline(recent_hashrates_24h, width=35)
+            min_24h = min(recent_hashrates_24h)
+            max_24h = max(recent_hashrates_24h)
+            table.add_row(
+                "Trend (24h):",
+                f"[blue]{sparkline_24h}[/blue] [dim]({min_24h:.0f}-{max_24h:.0f} GH/s)[/dim]"
+            )
+
+        table.add_row("", "")  # Spacer before thermal section
+
         # ASIC Temperature with bar
         asic_temp = latest['asic_temp']
         temp_pct = int(asic_temp / 70 * 100)  # 70°C = 100%
@@ -137,7 +453,7 @@ class BitaxeDashboard:
 
         # VR Temperature
         vreg_temp = latest['vreg_temp']
-        vr_color = "red" if vreg_temp >= 65 else "yellow" if vreg_temp >= 58 else "white"
+        vr_color = "red" if vreg_temp >= 80 else "yellow" if vreg_temp >= 70 else "white"
         table.add_row(
             "VR Temp:",
             f"[{vr_color}]{vreg_temp:.1f}°C[/{vr_color}]"
@@ -174,16 +490,79 @@ class BitaxeDashboard:
         fan_speed = latest['fan_speed']
         table.add_row("Fan:", f"{fan_rpm} RPM ({fan_speed}%)")
 
-        # Uptime
-        uptime_hours = latest['uptime'] / 3600
-        table.add_row("Uptime:", f"{uptime_hours:.1f}h")
+        # Uptime - show both session and total
+        uptime_stats = self.get_total_uptime(device_id)
+        if uptime_stats:
+            session_h = uptime_stats['session_hours']
+            total_h = uptime_stats['total_hours']
+
+            # Format uptime nicely (show days if > 24h)
+            def format_uptime(hours):
+                if hours >= 24:
+                    days = int(hours // 24)
+                    remaining_hours = hours % 24
+                    return f"{days}d {remaining_hours:.1f}h"
+                return f"{hours:.1f}h"
+
+            session_str = format_uptime(session_h)
+            total_str = format_uptime(total_h)
+
+            # Show restart count if total > session
+            if total_h > session_h * 1.1:  # 10% threshold to account for rounding
+                table.add_row(
+                    "Uptime:",
+                    f"{session_str} [dim](session)[/dim] | {total_str} [dim](total)[/dim]"
+                )
+            else:
+                table.add_row("Uptime:", f"{session_str}")
+        else:
+            uptime_hours = latest['uptime'] / 3600
+            table.add_row("Uptime:", f"{uptime_hours:.1f}h")
+
+        # Stability Analysis Section
+        table.add_row("", "")  # Spacer
+        table.add_row("[bold cyan]═══ Hashrate Variability ═══[/bold cyan]", "")
+
+        def format_variance(variance_pct: float) -> tuple:
+            """Return color and status for variance percentage (BM1370 calibrated)."""
+            if variance_pct < 30:
+                return "green", "Excellent"
+            elif variance_pct < 50:
+                return "green", "Stable"
+            elif variance_pct < 70:
+                return "yellow", "Acceptable"
+            elif variance_pct < 90:
+                return "yellow", "Variable"
+            else:
+                return "red", "Unstable"
+
+        # Display variance for each timeframe
+        for timeframe in ['1h', '4h', '8h', '24h', '3d']:
+            data = variance_data.get(timeframe)
+            if data:
+                variance = data['variance']
+                samples = data['samples']
+                color, status = format_variance(variance)
+
+                # Create visual bar (scaled 0-100% = 0-10 blocks for BM1370)
+                bar_blocks = min(int(variance / 10), 10)
+                bar = '█' * bar_blocks
+
+                table.add_row(
+                    f"  {timeframe}:",
+                    f"[{color}]{variance:>4.1f}% {bar:<10}[/{color}] [{color}]{status}[/{color}] [dim]({samples} samples)[/dim]"
+                )
+            else:
+                table.add_row(f"  {timeframe}:", "[dim]No data[/dim]")
 
         # Check for warnings
         warnings = []
         if asic_temp >= 65:
             warnings.append("[red]⚠️  THERMAL LIMIT[/red]")
-        if vreg_temp >= 65:
-            warnings.append("[red]⚠️  VR OVERHEATING[/red]")
+        if vreg_temp >= 80:
+            warnings.append("[red]🔥 VR OVERHEATING[/red]")
+        elif vreg_temp >= 70:
+            warnings.append("[yellow]⚠️  High VR Temp[/yellow]")
         if voltage < 4.8:
             warnings.append("[red]⚠️  PSU VOLTAGE SAG[/red]")
         elif voltage < 4.9:
@@ -216,7 +595,7 @@ class BitaxeDashboard:
 
         return Panel(
             table,
-            title=f"[bold cyan]{device_id}[/bold cyan]",
+            title=f"[bold cyan]{device_id}[/bold cyan] [dim]({device_ip})[/dim]",
             subtitle=update_str,
             border_style=border_style
         )
@@ -306,7 +685,7 @@ class BitaxeDashboard:
 
         return layout
 
-    def run(self, refresh_interval: int = 3):
+    def run(self, refresh_interval: int = 5):
         """Run the dashboard.
 
         Args:
@@ -360,7 +739,7 @@ def main():
     dashboard = BitaxeDashboard(config, db, analyzer)
 
     try:
-        dashboard.run(refresh_interval=3)
+        dashboard.run(refresh_interval=5)
     finally:
         db.close()
 

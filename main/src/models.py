@@ -157,6 +157,10 @@ class PerformanceMetric(BaseModel):
     efficiency_jth: float
     efficiency_ghw: float
 
+    # Difficulty Stats
+    best_diff: Optional[float] = None
+    best_session_diff: Optional[float] = None
+
     @classmethod
     def from_system_info(
         cls,
@@ -181,5 +185,7 @@ class PerformanceMetric(BaseModel):
             shares_rejected=info.sharesRejected,
             uptime=info.uptimeSeconds,
             efficiency_jth=info.efficiency_jth,
-            efficiency_ghw=info.efficiency_ghw
+            efficiency_ghw=info.efficiency_ghw,
+            best_diff=info.bestDiff,
+            best_session_diff=info.bestSessionDiff
         )
