@@ -122,8 +122,8 @@ def cmd_stats(analyzer: Analyzer):
             for cfg in data['configs']:
                 config_name = f"{cfg['frequency']}@{cfg['core_voltage']}"
 
-                # Add indicator for best efficiency
-                indicator = "🏆" if cfg == min(data['configs'], key=lambda x: x['avg_efficiency_jth']) else "  "
+                # Add indicator for best hashrate
+                indicator = "🏆" if cfg == max(data['configs'], key=lambda x: x['avg_hashrate']) else "  "
 
                 print(
                     f"   {indicator}{config_name:<16} "

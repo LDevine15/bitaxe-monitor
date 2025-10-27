@@ -4,6 +4,8 @@
 import sys
 import time
 import yaml
+import subprocess
+import platform
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
@@ -43,6 +45,54 @@ class BitaxeDashboard:
         # Get enabled devices
         self.devices = [d for d in config["devices"] if d.get("enabled", True)]
 
+        # Ping tracking for session statistics
+        self.ping_history = {}  # {device_id: [ping1, ping2, ...]}
+        self.session_start = datetime.now()
+
+    def ping_device(self, ip_address: str) -> Optional[float]:
+        """Ping a device and return latency in milliseconds.
+
+        Args:
+            ip_address: IP address to ping
+
+        Returns:
+            Ping latency in ms or None if unreachable
+        """
+        try:
+            system = platform.system().lower()
+
+            # Build platform-specific ping command
+            if system == 'windows':
+                command = ['ping', '-n', '1', '-w', '1000', ip_address]
+            elif system == 'darwin':  # macOS
+                command = ['ping', '-c', '1', '-W', '1000', ip_address]
+            else:  # Linux
+                command = ['ping', '-c', '1', '-W', '1', ip_address]
+
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=2,
+                text=True
+            )
+
+            if result.returncode == 0:
+                # Parse ping output for latency
+                output = result.stdout
+                if 'time=' in output.lower():
+                    # Extract time value (works for Linux/Mac/Windows)
+                    for line in output.split('\n'):
+                        if 'time=' in line.lower():
+                            # Find the time= part
+                            time_part = line.lower().split('time=')[1]
+                            # Extract just the number (handle "time=52.212 ms" or "time=52.212ms")
+                            time_str = time_part.split()[0].replace('ms', '').strip()
+                            return float(time_str)
+            return None
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, ValueError, IndexError) as e:
+            return None
+
     def get_uptime_average_hashrate(self, device_id: str, uptime_seconds: int) -> Optional[float]:
         """Get average hashrate during the current uptime period.
 
@@ -70,6 +120,45 @@ class BitaxeDashboard:
         row = cursor.fetchone()
         if row and row[0]:
             return round(row[0], 1)
+        return None
+
+    def get_session_power_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
+        """Get power statistics during the current uptime session.
+
+        Args:
+            device_id: Device identifier
+            uptime_seconds: Current uptime in seconds
+
+        Returns:
+            Dictionary with min, max, avg power or None if no data
+        """
+        from datetime import timedelta
+
+        # Calculate when device was rebooted
+        reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
+
+        # Query power statistics since reboot
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT
+                MIN(power) as min_power,
+                MAX(power) as max_power,
+                AVG(power) as avg_power,
+                COUNT(*) as sample_count
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+              AND power IS NOT NULL
+        """, (device_id, reboot_time))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None and row[3] > 0:  # Check samples exist
+            return {
+                'min': round(row[0], 2),
+                'max': round(row[1], 2),
+                'avg': round(row[2], 2),
+                'samples': row[3]
+            }
         return None
 
     def get_hashrate_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
@@ -369,6 +458,11 @@ class BitaxeDashboard:
         device_config = next((d for d in self.devices if d["name"] == device_id), None)
         device_ip = device_config["ip"] if device_config else "Unknown"
 
+        # Get device info for pool data
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT * FROM devices WHERE id = ?", (device_id,))
+        device_info = cursor.fetchone()
+
         latest = self.db.get_latest_metric(device_id)
 
         if not latest:
@@ -381,6 +475,9 @@ class BitaxeDashboard:
         # Get uptime and calculate average
         uptime_seconds = latest['uptime']
         avg_hashrate = self.get_uptime_average_hashrate(device_id, uptime_seconds)
+
+        # Get session power statistics
+        power_stats = self.get_session_power_stats(device_id, uptime_seconds)
 
         # Get multi-timeframe variance
         variance_data = self.get_multi_timeframe_variance(device_id)
@@ -399,6 +496,52 @@ class BitaxeDashboard:
         core_v = latest['core_voltage']
         table.add_row("Frequency:", f"[bold cyan]{freq} MHz[/bold cyan]")
         table.add_row("Core Voltage:", f"[bold cyan]{core_v} mV[/bold cyan]")
+
+        # Ping latency
+        ping_ms = self.ping_device(device_ip)
+
+        # Track ping history for this device
+        if device_id not in self.ping_history:
+            self.ping_history[device_id] = []
+
+        if ping_ms is not None:
+            # Add to history (keep last 100 pings to avoid memory bloat)
+            self.ping_history[device_id].append(ping_ms)
+            if len(self.ping_history[device_id]) > 100:
+                self.ping_history[device_id].pop(0)
+
+            # Calculate average
+            avg_ping = sum(self.ping_history[device_id]) / len(self.ping_history[device_id])
+
+            # Color code based on current latency
+            if ping_ms < 5:
+                ping_color = "green"
+            elif ping_ms < 20:
+                ping_color = "yellow"
+            else:
+                ping_color = "red"
+
+            # Show current and average
+            table.add_row(
+                "Ping:",
+                f"[{ping_color}]{ping_ms:.1f} ms[/{ping_color}] [dim](avg: {avg_ping:.1f} ms, {len(self.ping_history[device_id])} samples)[/dim]"
+            )
+        else:
+            table.add_row("Ping:", "[red]Unreachable[/red]")
+
+        # Pool information
+        if device_info:
+            device_dict = dict(device_info)
+            stratum_url = device_dict.get('stratum_url')
+            stratum_port = device_dict.get('stratum_port')
+
+            if stratum_url and stratum_port:
+                # Truncate pool URL if too long
+                pool_display = stratum_url
+                if len(pool_display) > 35:
+                    pool_display = pool_display[:32] + "..."
+                table.add_row("Pool:", f"[cyan]{pool_display}:{stratum_port}[/cyan]")
+
         table.add_row("", "")  # Spacer
 
         # Hashrate with bar (current)
@@ -467,6 +610,29 @@ class BitaxeDashboard:
             "Power:",
             f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of 30W)"
         )
+
+        # Session power range
+        if power_stats:
+            power_range = power_stats['max'] - power_stats['min']
+            power_avg = power_stats['avg']
+            range_str = f"{power_stats['min']:.1f}-{power_stats['max']:.1f}W (avg: {power_avg:.1f}W)"
+            range_pct = (power_range / power_avg * 100) if power_avg > 0 else 0
+
+            # Color code based on range stability
+            if range_pct < 10:
+                range_color = "green"
+                stability = "Stable"
+            elif range_pct < 20:
+                range_color = "yellow"
+                stability = "Variable"
+            else:
+                range_color = "red"
+                stability = "Unstable"
+
+            table.add_row(
+                "Session Range:",
+                f"[{range_color}]{range_str}[/{range_color}] [dim]({stability}, {power_stats['samples']} samples)[/dim]"
+            )
 
         # Input Voltage
         voltage = latest['voltage']

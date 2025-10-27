@@ -45,6 +45,19 @@ class Database:
             self.conn.commit()
             logger.info("Database migration completed successfully")
 
+        # Check if pool columns exist in devices table
+        cursor.execute("PRAGMA table_info(devices)")
+        device_columns = [row[1] for row in cursor.fetchall()]
+
+        # Add pool columns if they don't exist
+        if 'stratum_url' not in device_columns:
+            logger.info("Migrating database: Adding pool tracking columns to devices...")
+            cursor.execute("ALTER TABLE devices ADD COLUMN stratum_url TEXT")
+            cursor.execute("ALTER TABLE devices ADD COLUMN stratum_port INTEGER")
+            cursor.execute("ALTER TABLE devices ADD COLUMN stratum_user TEXT")
+            self.conn.commit()
+            logger.info("Pool tracking migration completed successfully")
+
     def init_schema(self):
         """Initialize database schema with tables and indexes."""
         cursor = self.conn.cursor()
@@ -137,7 +150,9 @@ class Database:
         # Run migrations for existing databases
         self.migrate_schema()
 
-    def register_device(self, device_id: str, ip_address: str, hostname: str = None, model: str = None):
+    def register_device(self, device_id: str, ip_address: str, hostname: Optional[str] = None,
+                       model: Optional[str] = None, stratum_url: Optional[str] = None,
+                       stratum_port: Optional[int] = None, stratum_user: Optional[str] = None):
         """Register or update a device.
 
         Args:
@@ -145,16 +160,22 @@ class Database:
             ip_address: IP address of device
             hostname: Device hostname (optional)
             model: Device model (optional)
+            stratum_url: Mining pool URL (optional)
+            stratum_port: Mining pool port (optional)
+            stratum_user: Mining pool username (optional)
         """
         cursor = self.conn.cursor()
         cursor.execute("""
-            INSERT INTO devices (id, ip_address, hostname, model)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO devices (id, ip_address, hostname, model, stratum_url, stratum_port, stratum_user)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 ip_address = excluded.ip_address,
                 hostname = excluded.hostname,
-                model = excluded.model
-        """, (device_id, ip_address, hostname, model))
+                model = excluded.model,
+                stratum_url = excluded.stratum_url,
+                stratum_port = excluded.stratum_port,
+                stratum_user = excluded.stratum_user
+        """, (device_id, ip_address, hostname, model, stratum_url, stratum_port, stratum_user))
         self.conn.commit()
         logger.debug(f"Registered device: {device_id} ({ip_address})")
 

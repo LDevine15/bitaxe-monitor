@@ -112,12 +112,15 @@ class BitaxeLogger:
             device_ip: Device IP address
             info: System information from API
         """
-        # Register/update device
+        # Register/update device with pool info
         self.db.register_device(
             device_id=device_name,
             ip_address=device_ip,
             hostname=info.hostname,
-            model=info.ASICModel
+            model=info.ASICModel,
+            stratum_url=info.stratumURL,
+            stratum_port=info.stratumPort,
+            stratum_user=info.stratumUser
         )
 
         # Get or create clock config
