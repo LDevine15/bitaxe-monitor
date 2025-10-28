@@ -125,81 +125,52 @@ class BitaxeDashboard:
             return round(row[0], 1)
         return None
 
-    def get_session_power_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
-        """Get power statistics during the current uptime session.
+    def _get_session_metric_stats(self, device_id: str, uptime_seconds: int, metric: str, precision: int = 2) -> Optional[Dict]:
+        """Get statistics for a metric during the current uptime session.
 
         Args:
             device_id: Device identifier
             uptime_seconds: Current uptime in seconds
+            metric: Metric column name (e.g., 'power', 'current')
+            precision: Decimal places for rounding
 
         Returns:
-            Dictionary with min, max, avg power or None if no data
-        """
-        from datetime import timedelta
-
-        # Calculate when device was rebooted
-        reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
-
-        # Query power statistics since reboot
-        cursor = self.db.conn.cursor()
-        cursor.execute("""
-            SELECT
-                MIN(power) as min_power,
-                MAX(power) as max_power,
-                AVG(power) as avg_power,
-                COUNT(*) as sample_count
-            FROM performance_metrics
-            WHERE device_id = ?
-              AND timestamp >= ?
-              AND power IS NOT NULL
-        """, (device_id, reboot_time))
-
-        row = cursor.fetchone()
-        if row and row[0] is not None and row[3] > 0:  # Check samples exist
-            return {
-                'min': round(row[0], 2),
-                'max': round(row[1], 2),
-                'avg': round(row[2], 2),
-                'samples': row[3]
-            }
-        return None
-
-    def get_session_current_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
-        """Get current draw statistics during the current uptime session.
-
-        Args:
-            device_id: Device identifier
-            uptime_seconds: Current uptime in seconds
-
-        Returns:
-            Dictionary with min, max, avg current or None if no data
+            Dictionary with min, max, avg, samples or None if no data
         """
         from datetime import timedelta
 
         reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
-
         cursor = self.db.conn.cursor()
-        cursor.execute("""
+
+        cursor.execute(f"""
             SELECT
-                MIN(current) as min_current,
-                MAX(current) as max_current,
-                AVG(current) as avg_current,
+                MIN({metric}) as min_val,
+                MAX({metric}) as max_val,
+                AVG({metric}) as avg_val,
                 COUNT(*) as sample_count
             FROM performance_metrics
             WHERE device_id = ?
               AND timestamp >= ?
-              AND current IS NOT NULL
+              AND {metric} IS NOT NULL
         """, (device_id, reboot_time))
 
         row = cursor.fetchone()
         if row and row[0] is not None and row[3] > 0:
             return {
-                'min': round(row[0], 2),
-                'max': round(row[1], 2),
-                'avg': round(row[2], 2),
+                'min': round(row[0], precision),
+                'max': round(row[1], precision),
+                'avg': round(row[2], precision),
                 'samples': row[3]
             }
         return None
+
+    def get_session_power_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
+        """Get power statistics during the current uptime session."""
+        return self._get_session_metric_stats(device_id, uptime_seconds, 'power', precision=2)
+
+    def get_session_current_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
+        """Get current draw statistics during the current uptime session."""
+        return self._get_session_metric_stats(device_id, uptime_seconds, 'current', precision=2)
 
     def get_hashrate_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
         """Get hashrate statistics for a specific timeframe.
@@ -550,6 +521,109 @@ class BitaxeDashboard:
             return "yellow"
         return "white" if lite_mode else "green"
 
+    def _calculate_median(self, values: list) -> float:
+        """Calculate median of a list of numbers.
+
+        Args:
+            values: List of numeric values
+
+        Returns:
+            Median value
+        """
+        sorted_vals = sorted(values)
+        n = len(sorted_vals)
+        if n % 2 == 0:
+            return (sorted_vals[n//2 - 1] + sorted_vals[n//2]) / 2
+        return sorted_vals[n//2]
+
+    def _format_uptime(self, hours: float) -> str:
+        """Format uptime hours as days/hours string.
+
+        Args:
+            hours: Uptime in hours
+
+        Returns:
+            Formatted string (e.g., "2d 5.3h" or "15.2h")
+        """
+        if hours >= 24:
+            days = int(hours // 24)
+            remaining_hours = hours % 24
+            return f"{days}d {remaining_hours:.1f}h"
+        return f"{hours:.1f}h"
+
+    def _format_current_vs_avg(self, label: str, current: float, avg: float,
+                                unit: str, lower_is_better: bool = False,
+                                precision: int = 1) -> tuple:
+        """Format current/avg display with colored diff.
+
+        Args:
+            label: Display label
+            current: Current value
+            avg: Average value
+            unit: Unit string (e.g., 'GH/s', 'W', 'J/TH')
+            lower_is_better: True if lower values are better (efficiency)
+            precision: Decimal precision
+
+        Returns:
+            Tuple of (label, formatted_string)
+        """
+        diff = current - avg
+        sign = "+" if diff >= 0 else ""
+
+        # Determine color based on whether lower is better
+        if lower_is_better:
+            color = "green" if diff <= 0 else "yellow"
+        else:
+            color = "green" if diff >= 0 else "yellow"
+
+        return (
+            label,
+            f"[cyan]{current:.{precision}f}[/cyan] / {avg:.{precision}f} {unit} "
+            f"[{color}]({sign}{diff:.{precision}f})[/{color}]"
+        )
+
+    def _format_sparkline_with_range(self, label: str, hashrates: list,
+                                      width: int, color: str) -> tuple:
+        """Format sparkline with min-max range display.
+
+        Args:
+            label: Display label
+            hashrates: List of hashrate values
+            width: Sparkline width
+            color: Color for sparkline
+
+        Returns:
+            Tuple of (label, formatted_string) or None if insufficient data
+        """
+        if len(hashrates) <= 1:
+            return None
+
+        sparkline = self.create_hashrate_sparkline(hashrates, width=width)
+        min_val = min(hashrates)
+        max_val = max(hashrates)
+        return (
+            label,
+            f"[{color}]{sparkline}[/{color}] [dim]({min_val:.0f}-{max_val:.0f})[/dim]"
+        )
+
+    def _create_no_data_panel(self, device_id: str, device_ip: str,
+                               message: str = "No data") -> Panel:
+        """Create a panel for when no data is available.
+
+        Args:
+            device_id: Device identifier
+            device_ip: Device IP address
+            message: Message to display
+
+        Returns:
+            Panel with error message
+        """
+        return Panel(
+            Text(message, style="dim"),
+            title=f"[cyan]{device_id}[/cyan] [dim]({device_ip})[/dim]",
+            border_style="red"
+        )
+
     def _get_border_color_from_metrics(self, asic_temp: float, vreg_temp: float, voltage: float) -> str:
         """Get panel border color based on health metrics.
 
@@ -607,11 +681,7 @@ class BitaxeDashboard:
         latest = self.db.get_latest_metric(device_id)
 
         if not latest:
-            return Panel(
-                Text("No data available", style="dim"),
-                title=f"[bold cyan]{device_id}[/bold cyan] [dim]({device_ip})[/dim]",
-                border_style="red"
-            )
+            return self._create_no_data_panel(device_id, device_ip, "No data available")
 
         # Get uptime and calculate average
         uptime_seconds = latest['uptime']
@@ -648,14 +718,7 @@ class BitaxeDashboard:
             avg_ping = sum(ping_list) / len(ping_list)
             min_ping = min(ping_list)
             max_ping = max(ping_list)
-
-            # Calculate median
-            sorted_pings = sorted(ping_list)
-            n = len(sorted_pings)
-            if n % 2 == 0:
-                median_ping = (sorted_pings[n//2 - 1] + sorted_pings[n//2]) / 2
-            else:
-                median_ping = sorted_pings[n//2]
+            median_ping = self._calculate_median(ping_list)
 
             # Color code based on current latency
             ping_color = self._get_ping_color(ping_ms)
@@ -732,16 +795,8 @@ class BitaxeDashboard:
             session_h = uptime_stats['session_hours']
             total_h = uptime_stats['total_hours']
 
-            # Format uptime nicely (show days if > 24h)
-            def format_uptime(hours):
-                if hours >= 24:
-                    days = int(hours // 24)
-                    remaining_hours = hours % 24
-                    return f"{days}d {remaining_hours:.1f}h"
-                return f"{hours:.1f}h"
-
-            session_str = format_uptime(session_h)
-            total_str = format_uptime(total_h)
+            session_str = self._format_uptime(session_h)
+            total_str = self._format_uptime(total_h)
 
             # Show restart count if total > session
             if total_h > session_h * 1.1:  # 10% threshold to account for rounding
@@ -1009,11 +1064,7 @@ class BitaxeDashboard:
         latest = self.db.get_latest_metric(device_id)
 
         if not latest:
-            return Panel(
-                Text("No data", style="dim"),
-                title=f"[cyan]{device_id}[/cyan] [dim]({device_ip})[/dim]",
-                border_style="red"
-            )
+            return self._create_no_data_panel(device_id, device_ip, "No data")
 
         # Get uptime and statistics
         uptime_seconds = latest['uptime']
@@ -1056,41 +1107,25 @@ class BitaxeDashboard:
         # Hashrate line
         hashrate = latest['hashrate']
         if avg_hashrate:
-            hash_diff = hashrate - avg_hashrate
-            hash_sign = "+" if hash_diff >= 0 else ""
-            hash_color = "green" if hash_diff >= 0 else "yellow"
-            table.add_row(
-                "Hash/Avg:",
-                f"[cyan]{hashrate:.1f}[/cyan] / {avg_hashrate:.1f} GH/s [{hash_color}]({hash_sign}{hash_diff:.1f})[/{hash_color}]"
-            )
+            table.add_row(*self._format_current_vs_avg("Hash/Avg:", hashrate, avg_hashrate, "GH/s"))
         else:
             table.add_row("Hash/Avg:", f"[cyan]{hashrate:.1f}[/cyan] GH/s")
 
         # Trend graphs
-        if len(recent_hashrates_1h) > 1:
-            sparkline_1h = self.create_hashrate_sparkline(recent_hashrates_1h, width=30)
-            min_1h = min(recent_hashrates_1h)
-            max_1h = max(recent_hashrates_1h)
-            table.add_row("1h:", f"[cyan]{sparkline_1h}[/cyan] [dim]({min_1h:.0f}-{max_1h:.0f})[/dim]")
+        sparkline_1h = self._format_sparkline_with_range("1h:", recent_hashrates_1h, width=30, color="cyan")
+        if sparkline_1h:
+            table.add_row(*sparkline_1h)
 
-        if len(recent_hashrates_24h) > 1:
-            sparkline_24h = self.create_hashrate_sparkline(recent_hashrates_24h, width=30)
-            min_24h = min(recent_hashrates_24h)
-            max_24h = max(recent_hashrates_24h)
-            table.add_row("24h:", f"[blue]{sparkline_24h}[/blue] [dim]({min_24h:.0f}-{max_24h:.0f})[/dim]")
+        sparkline_24h = self._format_sparkline_with_range("24h:", recent_hashrates_24h, width=30, color="blue")
+        if sparkline_24h:
+            table.add_row(*sparkline_24h)
 
         # Efficiency: current / avg
         efficiency = latest['efficiency_jth']
         if power_stats and avg_hashrate:
             # Calculate average efficiency from avg hashrate and avg power
             avg_efficiency = power_stats['avg'] / (avg_hashrate / 1000.0)
-            eff_diff = efficiency - avg_efficiency
-            eff_sign = "+" if eff_diff >= 0 else ""
-            eff_color = "green" if eff_diff <= 0 else "yellow"  # Lower is better for J/TH
-            table.add_row(
-                "Eff/Avg:",
-                f"[cyan]{efficiency:.1f}[/cyan] / {avg_efficiency:.1f} J/TH [{eff_color}]({eff_sign}{eff_diff:.1f})[/{eff_color}]"
-            )
+            table.add_row(*self._format_current_vs_avg("Eff/Avg:", efficiency, avg_efficiency, "J/TH", lower_is_better=True))
         else:
             table.add_row("Eff/Avg:", f"[cyan]{efficiency:.1f}[/cyan] J/TH")
 
@@ -1117,14 +1152,7 @@ class BitaxeDashboard:
         # Power: current / avg
         power = latest['power']
         if power_stats:
-            avg_power = power_stats['avg']
-            power_diff = power - avg_power
-            power_sign = "+" if power_diff >= 0 else ""
-            power_color = "green" if abs(power_diff) < 1 else "yellow"
-            table.add_row(
-                "Power:",
-                f"[cyan]{power:.1f}[/cyan] / {avg_power:.1f}W [{power_color}]({power_sign}{power_diff:.1f})[/{power_color}]"
-            )
+            table.add_row(*self._format_current_vs_avg("Power:", power, power_stats['avg'], "W"))
         else:
             table.add_row("Power/Avg:", f"[cyan]{power:.1f}[/cyan]W")
 
