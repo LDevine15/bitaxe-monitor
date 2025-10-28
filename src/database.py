@@ -39,9 +39,8 @@ class Database:
 
         # Add difficulty columns if they don't exist
         if 'best_diff' not in columns:
-            logger.info("Migrating database: Adding difficulty tracking columns...")
+            logger.info("Migrating database: Adding difficulty tracking column...")
             cursor.execute("ALTER TABLE performance_metrics ADD COLUMN best_diff REAL")
-            cursor.execute("ALTER TABLE performance_metrics ADD COLUMN best_session_diff REAL")
             self.conn.commit()
             logger.info("Database migration completed successfully")
 
@@ -109,22 +108,7 @@ class Database:
                 efficiency_ghw REAL,
 
                 best_diff REAL,
-                best_session_diff REAL,
 
-                FOREIGN KEY (device_id) REFERENCES devices(id),
-                FOREIGN KEY (config_id) REFERENCES clock_configs(id)
-            )
-        """)
-
-        # Test sessions table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS test_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                device_id TEXT NOT NULL,
-                config_id INTEGER NOT NULL,
-                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                end_time TIMESTAMP,
-                notes TEXT,
                 FOREIGN KEY (device_id) REFERENCES devices(id),
                 FOREIGN KEY (config_id) REFERENCES clock_configs(id)
             )
@@ -251,15 +235,15 @@ class Database:
                 asic_temp, vreg_temp, fan_speed, fan_rpm,
                 shares_accepted, shares_rejected, uptime,
                 efficiency_jth, efficiency_ghw,
-                best_diff, best_session_diff
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                best_diff
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             metric.device_id, metric.timestamp, metric.config_id,
             metric.hashrate, metric.power, metric.voltage, metric.current,
             metric.asic_temp, metric.vreg_temp, metric.fan_speed, metric.fan_rpm,
             metric.shares_accepted, metric.shares_rejected, metric.uptime,
             metric.efficiency_jth, metric.efficiency_ghw,
-            metric.best_diff, metric.best_session_diff
+            metric.best_diff
         ))
         self.conn.commit()
 
@@ -290,7 +274,7 @@ class Database:
             return dict(row)
         return None
 
-    def get_metric_count(self, device_id: str = None) -> int:
+    def get_metric_count(self, device_id: str | None = None) -> int:
         """Get total number of metrics stored.
 
         Args:

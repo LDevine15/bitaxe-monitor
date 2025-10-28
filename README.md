@@ -8,7 +8,6 @@ A Python-based monitoring and analysis tool for Bitaxe ASIC Bitcoin miners. Auto
 - **Automatic config detection**: Segments data by frequency/voltage settings
 - **Time-series storage**: SQLite database with efficient indexing
 - **Efficiency calculations**: J/TH and GH/W metrics computed in real-time
-- **Session management**: Track structured testing sessions with notes
 - **Analysis tools**: Compare configurations, identify optimal settings
 - **Safety monitoring**: Temperature warnings and alerts
 
@@ -55,7 +54,8 @@ safety:
 ### 3. Start Logging
 
 ```bash
-python run_logger.py
+python run_logger.py  # Start logging
+python dashboard.py   # Start dashboard
 ```
 
 The logger will:
@@ -110,57 +110,19 @@ bitaxe-monitor/
 
 ## Usage Examples
 
-### Passive Monitoring
-
-Just run the logger and change settings via the Bitaxe web UI whenever you want. Data is automatically segmented by configuration.
-
-```bash
-python run_logger.py
-# Leave running 24/7
-# Change clock settings via web UI as desired
-# Analyze results later
-```
-
-### Active Testing Sessions
-
-For structured experiments with explicit session tracking:
-
-```bash
-# Start test session
-python run_logger.py session start \
-  --device bitaxe-1 \
-  --freq 600 --voltage 1200 \
-  --notes "Overnight test, ambient 22°C"
-
-# (Wait 8 hours)
-
-# End session
-python run_logger.py session end --device bitaxe-1
-
-# Start next test
-python run_logger.py session start \
-  --device bitaxe-1 \
-  --freq 625 --voltage 1250 \
-  --notes "Morning test, ambient 18°C"
-```
-
 ### Configuration Testing Workflow
 
 ```bash
-# 1. Baseline (2 hours each)
-# Set 550MHz @ 1150mV via web UI, let logger run
+# 1. Start the logger
+python run_logger.py
 
-# 2. Medium overclock
-# Set 575MHz @ 1200mV via web UI
+# 2. Test each configuration (2+ hours each)
+# - Set 550MHz @ 1150mV via Bitaxe web UI, let it run
+# - Set 575MHz @ 1200mV via web UI, let it run
+# - Set 600MHz @ 1250mV via web UI, let it run
 
-# 3. High overclock
-# Set 600MHz @ 1250mV via web UI
-
-# 4. Analyze results
+# 3. Analyze results
 python stats.py compare bitaxe-1
-
-# 5. Generate report
-python dashboard.py
 ```
 
 ## Key Metrics
@@ -178,23 +140,6 @@ python dashboard.py
 - Recommended voltage range: 1150-1250mV
 - Recommended frequency range: 550-600MHz
 - Use adequate cooling and ventilation
-
-## Development Status
-
-**Current Phase**: Phase 1 - Basic Data Logger (MVP)
-
-Planned features:
-- [ ] Basic logging daemon
-- [ ] SQLite storage
-- [ ] Config auto-detection
-- [ ] Session management
-- [ ] Analysis tools
-- [ ] Terminal dashboard
-- [ ] Visualization/plotting
-- [ ] Web dashboard
-
-See [plan.md](plan.md) for complete roadmap.
-
 ## References
 
 - [ESP-Miner Firmware](https://github.com/bitaxeorg/ESP-Miner)
@@ -204,7 +149,3 @@ See [plan.md](plan.md) for complete roadmap.
 ## License
 
 MIT License - See LICENSE file for details
-
-## Contributing
-
-Contributions welcome! Please read the plan.md for architecture details before submitting PRs.

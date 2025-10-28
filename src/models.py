@@ -159,7 +159,6 @@ class PerformanceMetric(BaseModel):
 
     # Difficulty Stats
     best_diff: Optional[float] = None
-    best_session_diff: Optional[float] = None
 
     @classmethod
     def from_system_info(
@@ -186,6 +185,5 @@ class PerformanceMetric(BaseModel):
             uptime=info.uptimeSeconds,
             efficiency_jth=info.efficiency_jth,
             efficiency_ghw=info.efficiency_ghw,
-            best_diff=info.bestDiff,
-            best_session_diff=info.bestSessionDiff
+            best_diff=info.bestDiff
         )
