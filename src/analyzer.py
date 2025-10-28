@@ -39,7 +39,7 @@ class Analyzer:
         if hours:
             cutoff = datetime.now() - timedelta(hours=hours)
             time_filter = "AND pm.timestamp > ?"
-            params.append(cutoff)
+            params.append(cutoff.isoformat())
 
         query = f"""
             SELECT
