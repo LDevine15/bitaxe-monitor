@@ -475,6 +475,98 @@ class BitaxeDashboard:
 
         return results
 
+    def _get_device_ip(self, device_id: str) -> str:
+        """Get device IP from config.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Device IP address or "Unknown"
+        """
+        device_config = next((d for d in self.devices if d["name"] == device_id), None)
+        return device_config["ip"] if device_config else "Unknown"
+
+    def _track_ping_history(self, device_id: str, ping_ms: Optional[float]) -> None:
+        """Track ping in history (keep last 100).
+
+        Args:
+            device_id: Device identifier
+            ping_ms: Ping latency in milliseconds or None
+        """
+        if device_id not in self.ping_history:
+            self.ping_history[device_id] = []
+
+        if ping_ms is not None:
+            self.ping_history[device_id].append(ping_ms)
+            if len(self.ping_history[device_id]) > 100:
+                self.ping_history[device_id].pop(0)
+
+    def _get_ping_color(self, ping_ms: float) -> str:
+        """Get color for ping latency.
+
+        Args:
+            ping_ms: Ping latency in milliseconds
+
+        Returns:
+            Color string for rich formatting
+        """
+        if ping_ms < 50:
+            return "green"
+        elif ping_ms < 100:
+            return "yellow"
+        return "red"
+
+    def _get_temp_color(self, temp: float, warn_threshold: float, critical_threshold: float) -> str:
+        """Get color for temperature value.
+
+        Args:
+            temp: Temperature in Celsius
+            warn_threshold: Warning threshold
+            critical_threshold: Critical threshold
+
+        Returns:
+            Color string for rich formatting
+        """
+        if temp >= critical_threshold:
+            return "red"
+        elif temp >= warn_threshold:
+            return "yellow"
+        return "white"
+
+    def _get_voltage_color(self, voltage: float, lite_mode: bool = False) -> str:
+        """Get color for voltage value.
+
+        Args:
+            voltage: Voltage in volts
+            lite_mode: Use white for good voltage (lite mode)
+
+        Returns:
+            Color string for rich formatting
+        """
+        if voltage < 4.8:
+            return "red"
+        elif voltage < 4.9:
+            return "yellow"
+        return "white" if lite_mode else "green"
+
+    def _get_border_color_from_metrics(self, asic_temp: float, vreg_temp: float, voltage: float) -> str:
+        """Get panel border color based on health metrics.
+
+        Args:
+            asic_temp: ASIC temperature in Celsius
+            vreg_temp: VR temperature in Celsius
+            voltage: Input voltage
+
+        Returns:
+            Border color string ('red', 'yellow', or 'green')
+        """
+        if asic_temp >= 65 or vreg_temp >= 80 or voltage < 4.8:
+            return "red"
+        elif asic_temp >= 60 or vreg_temp >= 70 or voltage < 4.9:
+            return "yellow"
+        return "green"
+
     def format_difficulty(self, difficulty: float) -> str:
         """Format difficulty value with appropriate suffix.
 
@@ -505,8 +597,7 @@ class BitaxeDashboard:
             Rich Panel with device information
         """
         # Get device IP from config
-        device_config = next((d for d in self.devices if d["name"] == device_id), None)
-        device_ip = device_config["ip"] if device_config else "Unknown"
+        device_ip = self._get_device_ip(device_id)
 
         # Get device info for pool data
         cursor = self.db.conn.cursor()
@@ -549,17 +640,9 @@ class BitaxeDashboard:
 
         # Ping latency
         ping_ms = self.ping_device(device_ip)
-
-        # Track ping history for this device
-        if device_id not in self.ping_history:
-            self.ping_history[device_id] = []
+        self._track_ping_history(device_id, ping_ms)
 
         if ping_ms is not None:
-            # Add to history (keep last 100 pings to avoid memory bloat)
-            self.ping_history[device_id].append(ping_ms)
-            if len(self.ping_history[device_id]) > 100:
-                self.ping_history[device_id].pop(0)
-
             # Calculate statistics
             ping_list = self.ping_history[device_id]
             avg_ping = sum(ping_list) / len(ping_list)
@@ -575,12 +658,7 @@ class BitaxeDashboard:
                 median_ping = sorted_pings[n//2]
 
             # Color code based on current latency
-            if ping_ms < 50:
-                ping_color = "green"
-            elif ping_ms < 100:
-                ping_color = "yellow"
-            else:
-                ping_color = "red"
+            ping_color = self._get_ping_color(ping_ms)
 
             # Show current with stats
             table.add_row(
@@ -682,7 +760,7 @@ class BitaxeDashboard:
         # ASIC Temperature with bar
         asic_temp = latest['asic_temp']
         temp_pct = int(asic_temp / 70 * 100)  # 70°C = 100%
-        temp_color = "red" if asic_temp >= 65 else "yellow" if asic_temp >= 60 else "green"
+        temp_color = self._get_temp_color(asic_temp, warn_threshold=60, critical_threshold=65)
         table.add_row(
             "ASIC Temp:",
             f"[{temp_color}]{asic_temp:.1f}°C[/{temp_color}] {'█' * (temp_pct // 10)}"
@@ -690,7 +768,7 @@ class BitaxeDashboard:
 
         # VR Temperature
         vreg_temp = latest['vreg_temp']
-        vr_color = "red" if vreg_temp >= 80 else "yellow" if vreg_temp >= 70 else "white"
+        vr_color = self._get_temp_color(vreg_temp, warn_threshold=70, critical_threshold=80)
         table.add_row(
             "VR Temp:",
             f"[{vr_color}]{vreg_temp:.1f}°C[/{vr_color}]"
@@ -730,7 +808,7 @@ class BitaxeDashboard:
 
         # Input Voltage
         voltage = latest['voltage']
-        voltage_color = "red" if voltage < 4.8 else "yellow" if voltage < 4.9 else "green"
+        voltage_color = self._get_voltage_color(voltage)
         table.add_row(
             "Input V:",
             f"[{voltage_color}]{voltage:.2f}V[/{voltage_color}]"
@@ -926,8 +1004,7 @@ class BitaxeDashboard:
             Compact Rich Panel with essential device information
         """
         # Get device IP from config
-        device_config = next((d for d in self.devices if d["name"] == device_id), None)
-        device_ip = device_config["ip"] if device_config else "Unknown"
+        device_ip = self._get_device_ip(device_id)
 
         latest = self.db.get_latest_metric(device_id)
 
@@ -960,28 +1037,15 @@ class BitaxeDashboard:
 
         # Ping latency
         ping_ms = self.ping_device(device_ip)
-
-        # Track ping history for this device
-        if device_id not in self.ping_history:
-            self.ping_history[device_id] = []
+        self._track_ping_history(device_id, ping_ms)
 
         if ping_ms is not None:
-            # Add to history (keep last 100 pings)
-            self.ping_history[device_id].append(ping_ms)
-            if len(self.ping_history[device_id]) > 100:
-                self.ping_history[device_id].pop(0)
-
             # Calculate average
             ping_list = self.ping_history[device_id]
             avg_ping = sum(ping_list) / len(ping_list)
 
             # Color code based on average latency
-            if avg_ping < 50:
-                ping_color = "green"
-            elif avg_ping < 100:
-                ping_color = "yellow"
-            else:
-                ping_color = "red"
+            ping_color = self._get_ping_color(avg_ping)
 
             table.add_row("Avg Ping:", f"[{ping_color}]{avg_ping:.1f} ms[/{ping_color}]")
         else:
@@ -1024,30 +1088,30 @@ class BitaxeDashboard:
             eff_sign = "+" if eff_diff >= 0 else ""
             eff_color = "green" if eff_diff <= 0 else "yellow"  # Lower is better for J/TH
             table.add_row(
-                "Efficiency:",
+                "Eff/Avg:",
                 f"[cyan]{efficiency:.1f}[/cyan] / {avg_efficiency:.1f} J/TH [{eff_color}]({eff_sign}{eff_diff:.1f})[/{eff_color}]"
             )
         else:
-            table.add_row("Efficiency:", f"[cyan]{efficiency:.1f}[/cyan] J/TH")
+            table.add_row("Eff/Avg:", f"[cyan]{efficiency:.1f}[/cyan] J/TH")
 
         table.add_row("", "")  # Spacer
 
         # TEMPS/WATTS section header
-        table.add_row("[bold]- TEMPS/WATTS", "")
+        table.add_row("[bold]TEMPS/POWER:", "")
 
         # ASIC temp
         asic_temp = latest['asic_temp']
-        temp_color = "red" if asic_temp >= 65 else "yellow" if asic_temp >= 60 else "white"
+        temp_color = self._get_temp_color(asic_temp, warn_threshold=60, critical_threshold=65)
         table.add_row("ASIC:", f"[{temp_color}]{asic_temp:.1f}°C[/{temp_color}]")
 
         # VRM temp
         vreg_temp = latest['vreg_temp']
-        vr_color = "red" if vreg_temp >= 80 else "yellow" if vreg_temp >= 70 else "white"
+        vr_color = self._get_temp_color(vreg_temp, warn_threshold=70, critical_threshold=80)
         table.add_row("VRM:", f"[{vr_color}]{vreg_temp:.1f}°C[/{vr_color}]")
 
         # Voltage
         voltage = latest['voltage']
-        voltage_color = "red" if voltage < 4.8 else "yellow" if voltage < 4.9 else "white"
+        voltage_color = self._get_voltage_color(voltage, lite_mode=True)
         table.add_row("Voltage:", f"[{voltage_color}]{voltage:.2f}V[/{voltage_color}]")
 
         # Power: current / avg
@@ -1065,12 +1129,7 @@ class BitaxeDashboard:
             table.add_row("Power/Avg:", f"[cyan]{power:.1f}[/cyan]W")
 
         # Border color based on health
-        if asic_temp >= 65 or vreg_temp >= 80 or voltage < 4.8:
-            border_style = "red"
-        elif asic_temp >= 60 or vreg_temp >= 70 or voltage < 4.9:
-            border_style = "yellow"
-        else:
-            border_style = "green"
+        border_style = self._get_border_color_from_metrics(asic_temp, vreg_temp, voltage)
 
         return Panel(
             table,
