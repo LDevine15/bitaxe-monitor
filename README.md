@@ -18,7 +18,7 @@ A Python-based monitoring and analysis tool for Bitaxe ASIC Bitcoin miners. Auto
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/bitaxe-monitor.git
+git clone https://github.com/ldevine15/bitaxe-monitor.git
 cd bitaxe-monitor
 
 # Create virtual environment
@@ -69,13 +69,13 @@ The logger will:
 
 ```bash
 # View configuration performance summary
-python analyze.py compare-configs --device bitaxe-1
+python stats.py compare bitaxe-1
 
-# Find optimal configuration for efficiency
-python analyze.py optimize --metric efficiency
+# View summary statistics
+python stats.py summary bitaxe-1
 
 # Export data to CSV
-python analyze.py export --format csv --output results.csv
+python stats.py export bitaxe-1 results.csv
 ```
 
 ## Project Structure
@@ -90,7 +90,7 @@ bitaxe-monitor/
 ├── config.yaml                 # Device configuration (gitignored)
 │
 ├── run_logger.py               # Main entry point
-├── analyze.py                  # Analysis CLI
+├── stats.py                    # Statistics & analysis CLI
 ├── dashboard.py                # Real-time dashboard
 │
 ├── src/                        # Source code
@@ -99,10 +99,6 @@ bitaxe-monitor/
 │   ├── models.py              # Data models
 │   ├── logger.py              # Main logging daemon
 │   └── analyzer.py            # Analysis tools
-│
-├── cli/                        # CLI commands
-│
-├── tests/                      # Unit tests
 │
 ├── data/                       # Data directory (gitignored)
 │   ├── metrics.db             # SQLite database
@@ -161,7 +157,7 @@ python run_logger.py session start \
 # Set 600MHz @ 1250mV via web UI
 
 # 4. Analyze results
-python analyze.py compare-configs --device bitaxe-1
+python stats.py compare bitaxe-1
 
 # 5. Generate report
 python dashboard.py

@@ -261,7 +261,7 @@ class Analyzer:
             # Runtime & samples
             report.append(f"  ⏱️  Runtime:")
             report.append(f"     Duration:  {cfg['runtime_hours']:.1f} hours  ({cfg['sample_count']} samples)")
-            report.append(f"     Period:    {cfg['first_seen']} to {cfg['last_seen']}")
+            report.append(f"     Period:    {str(cfg['first_seen'])} to {str(cfg['last_seen'])}")
             report.append("")
 
             # Bottleneck analysis

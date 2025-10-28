@@ -54,6 +54,10 @@ data/*.db
 .env
 .env.local
 config.local.yaml
+config.yaml
+
+# Docs
+docs/
 
 # Test coverage
 .coverage

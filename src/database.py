@@ -208,6 +208,8 @@ class Database:
         )
         self.conn.commit()
         config_id = cursor.lastrowid
+        if config_id is None:
+            raise RuntimeError("Failed to create clock configuration: lastrowid is None")
         logger.debug(f"Created new config: {frequency}MHz@{core_voltage}mV (ID: {config_id})")
         return config_id
 

@@ -27,13 +27,13 @@ def load_config(config_path: str = "config.yaml") -> dict:
 def print_usage():
     """Print usage information."""
     print("""
-Bitaxe Performance Analyzer
+Bitaxe Performance Statistics
 
 Usage:
-    python analyze.py summary [device_id] [--hours N]
-    python analyze.py compare [device_id] [--hours N]
-    python analyze.py export [device_id] [output.csv]
-    python analyze.py stats
+    python stats.py summary [device_id] [--hours N]
+    python stats.py compare [device_id] [--hours N]
+    python stats.py export [device_id] [output.csv]
+    python stats.py stats
 
 Commands:
     summary         Show detailed performance summary for a device
@@ -46,14 +46,14 @@ Options:
     --hours N       Limit analysis to last N hours [default: all data]
 
 Examples:
-    python analyze.py compare bitaxe-1
-    python analyze.py summary bitaxe-2 --hours 24
-    python analyze.py export bitaxe-1 data.csv
-    python analyze.py stats
+    python stats.py compare bitaxe-1
+    python stats.py summary bitaxe-2 --hours 24
+    python stats.py export bitaxe-1 data.csv
+    python stats.py stats
 """)
 
 
-def cmd_summary(analyzer: Analyzer, device_id: str, hours: int = None):
+def cmd_summary(analyzer: Analyzer, device_id: str, hours: int | None = None):
     """Show summary for a device."""
     configs = analyzer.get_config_summary(device_id, hours)
 
@@ -88,7 +88,7 @@ def cmd_summary(analyzer: Analyzer, device_id: str, hours: int = None):
     print()
 
 
-def cmd_compare(analyzer: Analyzer, device_id: str, hours: int = None):
+def cmd_compare(analyzer: Analyzer, device_id: str, hours: int | None = None):
     """Show detailed comparison with bottleneck analysis."""
     report = analyzer.compare_configs(device_id, hours)
     print(report)
@@ -208,7 +208,7 @@ def main():
         elif command == "export":
             if len(sys.argv) < 3:
                 print("Error: Device ID required for export")
-                print("Usage: python analyze.py export [device_id] [output.csv]")
+                print("Usage: python stats.py export [device_id] [output.csv]")
                 sys.exit(1)
 
             device_id = sys.argv[2]
