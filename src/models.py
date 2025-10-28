@@ -2,7 +2,8 @@
 
 from pydantic import BaseModel, Field, computed_field, field_validator
 from datetime import datetime
-from typing import Optional, Union
+from typing import Optional, Union, List, Dict
+import json
 
 
 class SystemInfo(BaseModel):
@@ -32,9 +33,11 @@ class SystemInfo(BaseModel):
     # Mining Statistics
     sharesAccepted: int = Field(alias="sharesAccepted")
     sharesRejected: int = Field(alias="sharesRejected")
+    sharesRejectedReasons: Optional[List[Dict[str, Union[str, int]]]] = Field(None, alias="sharesRejectedReasons")
     uptimeSeconds: int = Field(alias="uptimeSeconds")
     bestDiff: Optional[float] = Field(None, alias="bestDiff")
     bestSessionDiff: Optional[float] = Field(None, alias="bestSessionDiff")
+    stratumDiff: Optional[float] = Field(None, alias="stratumDiff")
 
     @field_validator('bestDiff', 'bestSessionDiff', mode='before')
     @classmethod
@@ -159,6 +162,15 @@ class PerformanceMetric(BaseModel):
 
     # Difficulty Stats
     best_diff: Optional[float] = None
+    stratum_diff: Optional[float] = None
+    rejection_reasons: Optional[List[Dict[str, Union[str, int]]]] = None
+
+    @property
+    def rejection_reasons_json(self) -> Optional[str]:
+        """Serialize rejection reasons to JSON string for database storage."""
+        if self.rejection_reasons:
+            return json.dumps(self.rejection_reasons)
+        return None
 
     @classmethod
     def from_system_info(
@@ -185,5 +197,7 @@ class PerformanceMetric(BaseModel):
             uptime=info.uptimeSeconds,
             efficiency_jth=info.efficiency_jth,
             efficiency_ghw=info.efficiency_ghw,
-            best_diff=info.bestDiff
+            best_diff=info.bestDiff,
+            stratum_diff=info.stratumDiff,
+            rejection_reasons=info.sharesRejectedReasons
         )

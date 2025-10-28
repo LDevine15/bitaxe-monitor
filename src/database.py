@@ -57,6 +57,17 @@ class Database:
             self.conn.commit()
             logger.info("Pool tracking migration completed successfully")
 
+        # Check if stratum_diff and rejection_reasons columns exist
+        cursor.execute("PRAGMA table_info(performance_metrics)")
+        metrics_columns = [row[1] for row in cursor.fetchall()]
+
+        if 'stratum_diff' not in metrics_columns:
+            logger.info("Migrating database: Adding mining statistics columns...")
+            cursor.execute("ALTER TABLE performance_metrics ADD COLUMN stratum_diff REAL")
+            cursor.execute("ALTER TABLE performance_metrics ADD COLUMN rejection_reasons TEXT")
+            self.conn.commit()
+            logger.info("Mining statistics migration completed successfully")
+
     def init_schema(self):
         """Initialize database schema with tables and indexes."""
         cursor = self.conn.cursor()
@@ -108,6 +119,8 @@ class Database:
                 efficiency_ghw REAL,
 
                 best_diff REAL,
+                stratum_diff REAL,
+                rejection_reasons TEXT,
 
                 FOREIGN KEY (device_id) REFERENCES devices(id),
                 FOREIGN KEY (config_id) REFERENCES clock_configs(id)
@@ -235,15 +248,15 @@ class Database:
                 asic_temp, vreg_temp, fan_speed, fan_rpm,
                 shares_accepted, shares_rejected, uptime,
                 efficiency_jth, efficiency_ghw,
-                best_diff
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                best_diff, stratum_diff, rejection_reasons
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             metric.device_id, metric.timestamp, metric.config_id,
             metric.hashrate, metric.power, metric.voltage, metric.current,
             metric.asic_temp, metric.vreg_temp, metric.fan_speed, metric.fan_rpm,
             metric.shares_accepted, metric.shares_rejected, metric.uptime,
             metric.efficiency_jth, metric.efficiency_ghw,
-            metric.best_diff
+            metric.best_diff, metric.stratum_diff, metric.rejection_reasons_json
         ))
         self.conn.commit()
 

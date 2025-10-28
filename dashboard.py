@@ -6,6 +6,7 @@ import time
 import yaml
 import subprocess
 import platform
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Optional
@@ -28,19 +29,21 @@ from src.analyzer import Analyzer
 class BitaxeDashboard:
     """Real-time terminal dashboard for Bitaxe monitoring."""
 
-    def __init__(self, config: dict, db: Database, analyzer: Analyzer):
+    def __init__(self, config: dict, db: Database, analyzer: Analyzer, lite_mode: bool = False):
         """Initialize dashboard.
 
         Args:
             config: Configuration dictionary
             db: Database instance
             analyzer: Analyzer instance
+            lite_mode: Use compact lite mode for 4+ miners
         """
         self.config = config
         self.db = db
         self.analyzer = analyzer
         self.console = Console()
         self.running = False
+        self.lite_mode = lite_mode
 
         # Get enabled devices
         self.devices = [d for d in config["devices"] if d.get("enabled", True)]
@@ -153,6 +156,43 @@ class BitaxeDashboard:
 
         row = cursor.fetchone()
         if row and row[0] is not None and row[3] > 0:  # Check samples exist
+            return {
+                'min': round(row[0], 2),
+                'max': round(row[1], 2),
+                'avg': round(row[2], 2),
+                'samples': row[3]
+            }
+        return None
+
+    def get_session_current_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
+        """Get current draw statistics during the current uptime session.
+
+        Args:
+            device_id: Device identifier
+            uptime_seconds: Current uptime in seconds
+
+        Returns:
+            Dictionary with min, max, avg current or None if no data
+        """
+        from datetime import timedelta
+
+        reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
+
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT
+                MIN(current) as min_current,
+                MAX(current) as max_current,
+                AVG(current) as avg_current,
+                COUNT(*) as sample_count
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+              AND current IS NOT NULL
+        """, (device_id, reboot_time))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None and row[3] > 0:
             return {
                 'min': round(row[0], 2),
                 'max': round(row[1], 2),
@@ -608,6 +648,35 @@ class BitaxeDashboard:
                 f"[blue]{sparkline_24h}[/blue] [dim]({min_24h:.0f}-{max_24h:.0f} GH/s)[/dim]"
             )
 
+        # Uptime - show both session and total
+        uptime_stats = self.get_total_uptime(device_id)
+        if uptime_stats:
+            session_h = uptime_stats['session_hours']
+            total_h = uptime_stats['total_hours']
+
+            # Format uptime nicely (show days if > 24h)
+            def format_uptime(hours):
+                if hours >= 24:
+                    days = int(hours // 24)
+                    remaining_hours = hours % 24
+                    return f"{days}d {remaining_hours:.1f}h"
+                return f"{hours:.1f}h"
+
+            session_str = format_uptime(session_h)
+            total_str = format_uptime(total_h)
+
+            # Show restart count if total > session
+            if total_h > session_h * 1.1:  # 10% threshold to account for rounding
+                table.add_row(
+                    "Uptime:",
+                    f"{session_str} [dim](session)[/dim] | {total_str} [dim](total)[/dim]"
+                )
+            else:
+                table.add_row("Uptime:", f"{session_str}")
+        else:
+            uptime_hours = latest['uptime'] / 3600
+            table.add_row("Uptime:", f"{uptime_hours:.1f}h")
+
         table.add_row("", "")  # Spacer before thermal section
 
         # ASIC Temperature with bar
@@ -681,34 +750,62 @@ class BitaxeDashboard:
         fan_speed = latest['fan_speed']
         table.add_row("Fan:", f"{fan_rpm} RPM ({fan_speed}%)")
 
-        # Uptime - show both session and total
-        uptime_stats = self.get_total_uptime(device_id)
-        if uptime_stats:
-            session_h = uptime_stats['session_hours']
-            total_h = uptime_stats['total_hours']
+        # Mining Performance Section
+        table.add_row("", "")  # Spacer
+        table.add_row("[bold cyan]Mining Performance[/bold cyan]", "")
 
-            # Format uptime nicely (show days if > 24h)
-            def format_uptime(hours):
-                if hours >= 24:
-                    days = int(hours // 24)
-                    remaining_hours = hours % 24
-                    return f"{days}d {remaining_hours:.1f}h"
-                return f"{hours:.1f}h"
+        # Shares statistics
+        shares_accepted = latest['shares_accepted']
+        shares_rejected = latest['shares_rejected']
+        total_shares = shares_accepted + shares_rejected
 
-            session_str = format_uptime(session_h)
-            total_str = format_uptime(total_h)
+        if total_shares > 0:
+            reject_rate = (shares_rejected / total_shares) * 100
 
-            # Show restart count if total > session
-            if total_h > session_h * 1.1:  # 10% threshold to account for rounding
-                table.add_row(
-                    "Uptime:",
-                    f"{session_str} [dim](session)[/dim] | {total_str} [dim](total)[/dim]"
-                )
+            # Color code rejection rate
+            if reject_rate < 1:
+                reject_color = "green"
+            elif reject_rate < 3:
+                reject_color = "yellow"
             else:
-                table.add_row("Uptime:", f"{session_str}")
+                reject_color = "red"
+
+            table.add_row(
+                "Shares:",
+                f"{shares_accepted:,} accepted / [{reject_color}]{shares_rejected} rejected[/{reject_color}]"
+            )
+            table.add_row(
+                "Reject Rate:",
+                f"[{reject_color}]{reject_rate:.2f}%[/{reject_color}]"
+            )
         else:
-            uptime_hours = latest['uptime'] / 3600
-            table.add_row("Uptime:", f"{uptime_hours:.1f}h")
+            table.add_row("Shares:", "[dim]No shares submitted yet[/dim]")
+
+        # Stratum difficulty
+        stratum_diff = latest.get('stratum_diff')
+        if stratum_diff:
+            table.add_row("Pool Diff:", f"{self.format_difficulty(stratum_diff)}")
+
+        # Best difficulty
+        best_diff = latest.get('best_diff')
+        if best_diff:
+            table.add_row("Best Diff:", f"[bold green]{self.format_difficulty(best_diff)}[/bold green]")
+
+        # Rejection reasons breakdown
+        rejection_reasons_json = latest.get('rejection_reasons')
+        if rejection_reasons_json:
+            import json
+            try:
+                rejection_reasons = json.loads(rejection_reasons_json)
+                if rejection_reasons and len(rejection_reasons) > 0:
+                    table.add_row("", "")  # Spacer
+                    table.add_row("  [dim]Rejection Breakdown:[/dim]", "")
+                    for reason in rejection_reasons:
+                        message = reason.get('message', 'Unknown')
+                        count = reason.get('count', 0)
+                        table.add_row(f"    {message}:", f"[yellow]{count} shares[/yellow]")
+            except json.JSONDecodeError:
+                pass
 
         # Stability Analysis Section
         table.add_row("", "")  # Spacer
@@ -819,6 +916,168 @@ class BitaxeDashboard:
             border_style=border_style
         )
 
+    def create_device_panel_lite(self, device_id: str) -> Panel:
+        """Create a compact panel for lite mode (4+ miners).
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Compact Rich Panel with essential device information
+        """
+        # Get device IP from config
+        device_config = next((d for d in self.devices if d["name"] == device_id), None)
+        device_ip = device_config["ip"] if device_config else "Unknown"
+
+        latest = self.db.get_latest_metric(device_id)
+
+        if not latest:
+            return Panel(
+                Text("No data", style="dim"),
+                title=f"[cyan]{device_id}[/cyan] [dim]({device_ip})[/dim]",
+                border_style="red"
+            )
+
+        # Get uptime and statistics
+        uptime_seconds = latest['uptime']
+        avg_hashrate = self.get_uptime_average_hashrate(device_id, uptime_seconds)
+        power_stats = self.get_session_power_stats(device_id, uptime_seconds)
+        current_stats = self.get_session_current_stats(device_id, uptime_seconds)
+
+        # Get trend data
+        recent_hashrates_1h = self.get_bucketed_hashrate_trend(device_id, minutes=60, num_buckets=20)
+        recent_hashrates_24h = self.get_bucketed_hashrate_trend(device_id, minutes=1440, num_buckets=20)
+
+        # Create compact table
+        table = Table.grid(padding=(0, 1))
+        table.add_column(style="bold", width=12)
+        table.add_column()
+
+        # Configuration
+        freq = latest['frequency']
+        core_v = latest['core_voltage']
+        table.add_row("Config:", f"[bold cyan]{freq} MHz @ {core_v} mV[/bold cyan]")
+
+        # Ping latency
+        ping_ms = self.ping_device(device_ip)
+
+        # Track ping history for this device
+        if device_id not in self.ping_history:
+            self.ping_history[device_id] = []
+
+        if ping_ms is not None:
+            # Add to history (keep last 100 pings)
+            self.ping_history[device_id].append(ping_ms)
+            if len(self.ping_history[device_id]) > 100:
+                self.ping_history[device_id].pop(0)
+
+            # Calculate average
+            ping_list = self.ping_history[device_id]
+            avg_ping = sum(ping_list) / len(ping_list)
+
+            # Color code based on average latency
+            if avg_ping < 50:
+                ping_color = "green"
+            elif avg_ping < 100:
+                ping_color = "yellow"
+            else:
+                ping_color = "red"
+
+            table.add_row("Avg Ping:", f"[{ping_color}]{avg_ping:.1f} ms[/{ping_color}]")
+        else:
+            table.add_row("Avg Ping:", "[red]Unreachable[/red]")
+
+        table.add_row("", "")  # Spacer
+
+        # Hashrate line
+        hashrate = latest['hashrate']
+        if avg_hashrate:
+            hash_diff = hashrate - avg_hashrate
+            hash_sign = "+" if hash_diff >= 0 else ""
+            hash_color = "green" if hash_diff >= 0 else "yellow"
+            table.add_row(
+                "Hash/Avg:",
+                f"[cyan]{hashrate:.1f}[/cyan] / {avg_hashrate:.1f} GH/s [{hash_color}]({hash_sign}{hash_diff:.1f})[/{hash_color}]"
+            )
+        else:
+            table.add_row("Hash/Avg:", f"[cyan]{hashrate:.1f}[/cyan] GH/s")
+
+        # Trend graphs
+        if len(recent_hashrates_1h) > 1:
+            sparkline_1h = self.create_hashrate_sparkline(recent_hashrates_1h, width=30)
+            min_1h = min(recent_hashrates_1h)
+            max_1h = max(recent_hashrates_1h)
+            table.add_row("1h:", f"[cyan]{sparkline_1h}[/cyan] [dim]({min_1h:.0f}-{max_1h:.0f})[/dim]")
+
+        if len(recent_hashrates_24h) > 1:
+            sparkline_24h = self.create_hashrate_sparkline(recent_hashrates_24h, width=30)
+            min_24h = min(recent_hashrates_24h)
+            max_24h = max(recent_hashrates_24h)
+            table.add_row("24h:", f"[blue]{sparkline_24h}[/blue] [dim]({min_24h:.0f}-{max_24h:.0f})[/dim]")
+
+        # Efficiency: current / avg
+        efficiency = latest['efficiency_jth']
+        if power_stats and avg_hashrate:
+            # Calculate average efficiency from avg hashrate and avg power
+            avg_efficiency = power_stats['avg'] / (avg_hashrate / 1000.0)
+            eff_diff = efficiency - avg_efficiency
+            eff_sign = "+" if eff_diff >= 0 else ""
+            eff_color = "green" if eff_diff <= 0 else "yellow"  # Lower is better for J/TH
+            table.add_row(
+                "Efficiency:",
+                f"[cyan]{efficiency:.1f}[/cyan] / {avg_efficiency:.1f} J/TH [{eff_color}]({eff_sign}{eff_diff:.1f})[/{eff_color}]"
+            )
+        else:
+            table.add_row("Efficiency:", f"[cyan]{efficiency:.1f}[/cyan] J/TH")
+
+        table.add_row("", "")  # Spacer
+
+        # TEMPS/WATTS section header
+        table.add_row("[bold]- TEMPS/WATTS", "")
+
+        # ASIC temp
+        asic_temp = latest['asic_temp']
+        temp_color = "red" if asic_temp >= 65 else "yellow" if asic_temp >= 60 else "white"
+        table.add_row("ASIC:", f"[{temp_color}]{asic_temp:.1f}°C[/{temp_color}]")
+
+        # VRM temp
+        vreg_temp = latest['vreg_temp']
+        vr_color = "red" if vreg_temp >= 80 else "yellow" if vreg_temp >= 70 else "white"
+        table.add_row("VRM:", f"[{vr_color}]{vreg_temp:.1f}°C[/{vr_color}]")
+
+        # Voltage
+        voltage = latest['voltage']
+        voltage_color = "red" if voltage < 4.8 else "yellow" if voltage < 4.9 else "white"
+        table.add_row("Voltage:", f"[{voltage_color}]{voltage:.2f}V[/{voltage_color}]")
+
+        # Power: current / avg
+        power = latest['power']
+        if power_stats:
+            avg_power = power_stats['avg']
+            power_diff = power - avg_power
+            power_sign = "+" if power_diff >= 0 else ""
+            power_color = "green" if abs(power_diff) < 1 else "yellow"
+            table.add_row(
+                "Power:",
+                f"[cyan]{power:.1f}[/cyan] / {avg_power:.1f}W [{power_color}]({power_sign}{power_diff:.1f})[/{power_color}]"
+            )
+        else:
+            table.add_row("Power/Avg:", f"[cyan]{power:.1f}[/cyan]W")
+
+        # Border color based on health
+        if asic_temp >= 65 or vreg_temp >= 80 or voltage < 4.8:
+            border_style = "red"
+        elif asic_temp >= 60 or vreg_temp >= 70 or voltage < 4.9:
+            border_style = "yellow"
+        else:
+            border_style = "green"
+
+        return Panel(
+            table,
+            title=f"[cyan]{device_id}[/cyan] [dim]({device_ip})[/dim]",
+            border_style=border_style
+        )
+
     def create_summary_panel(self) -> Panel:
         """Create summary panel with overall stats."""
         summary = self.analyzer.get_all_devices_summary()
@@ -868,19 +1127,22 @@ class BitaxeDashboard:
             )
         )
 
+        # Choose panel creation method based on mode
+        panel_method = self.create_device_panel_lite if self.lite_mode else self.create_device_panel
+
         # Body - split by number of devices
         if len(self.devices) == 1:
-            layout["body"].update(self.create_device_panel(self.devices[0]["name"]))
+            layout["body"].update(panel_method(self.devices[0]["name"]))
         elif len(self.devices) == 2:
             layout["body"].split_row(
                 Layout(name="device1"),
                 Layout(name="device2")
             )
             layout["body"]["device1"].update(
-                self.create_device_panel(self.devices[0]["name"])
+                panel_method(self.devices[0]["name"])
             )
             layout["body"]["device2"].update(
-                self.create_device_panel(self.devices[1]["name"])
+                panel_method(self.devices[1]["name"])
             )
         else:
             # For 3+ devices, use grid layout
@@ -896,7 +1158,7 @@ class BitaxeDashboard:
                         Layout(name=f"device{i+1}")
                     )
                 layout["body"][f"row{row_idx}"][f"device{i}"].update(
-                    self.create_device_panel(device["name"])
+                    panel_method(device["name"])
                 )
 
         # Footer - summary
@@ -946,6 +1208,14 @@ def load_config(config_path: str = "config.yaml") -> dict:
 
 def main():
     """Main entry point."""
+    parser = argparse.ArgumentParser(description="Bitaxe Multi-Miner Dashboard")
+    parser.add_argument(
+        "--lite",
+        action="store_true",
+        help="Use compact lite mode for monitoring 4+ miners"
+    )
+    args = parser.parse_args()
+
     # Load config
     config = load_config()
     db_path = config["logging"]["database_path"]
@@ -955,7 +1225,7 @@ def main():
     analyzer = Analyzer(db)
 
     # Create and run dashboard
-    dashboard = BitaxeDashboard(config, db, analyzer)
+    dashboard = BitaxeDashboard(config, db, analyzer, lite_mode=args.lite)
 
     try:
         dashboard.run(refresh_interval=5)

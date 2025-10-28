@@ -54,8 +54,9 @@ safety:
 ### 3. Start Logging
 
 ```bash
-python run_logger.py  # Start logging
-python dashboard.py   # Start dashboard
+python run_logger.py  # Start logging (REQUIRED FOR DASHBOARD TO RUN)
+python dashboard.py   # Start full dashboard
+python dashboard.py --lite  # Start lite dashboard (better for multipleminers)
 ```
 
 The logger will:
