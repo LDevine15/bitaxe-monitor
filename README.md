@@ -56,13 +56,13 @@ safety:
 ```bash
 python run_logger.py  # Start logging (REQUIRED FOR DASHBOARD TO RUN)
 python dashboard.py   # Start full dashboard
-python dashboard.py --lite  # Start lite dashboard (better for multipleminers)
+python dashboard.py --lite  # Start lite dashboard (better for 3+ miners)
 ```
 
 The logger will:
-- Poll all enabled devices every 30 seconds
+- Poll all enabled devices every 30 seconds (or whatever is configured for `poll_interval`)
 - Automatically detect current clock configurations
-- Store metrics in SQLite database
+- Store metrics *per clock configuration* in SQLite database
 - Display real-time status in console
 - Alert on temperature warnings
 
