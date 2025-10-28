@@ -42,14 +42,7 @@ ENV/
 *.sqlite
 *.sqlite3
 *.log
-data/logs/*
-data/exports/*
-data/*.db
-
-# Keep directory structure
-!data/.gitkeep
-!data/logs/.gitkeep
-!data/exports/.gitkeep
+data/
 
 # Environment
 .env
