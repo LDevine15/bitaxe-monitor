@@ -383,14 +383,14 @@ class BitaxeDashboard:
             }
         return None
 
-    def get_multi_timeframe_variance(self, device_id: str) -> Dict[str, Optional[float]]:
+    def get_multi_timeframe_variance(self, device_id: str) -> Dict[str, Optional[Dict]]:
         """Get variance percentages for multiple timeframes using bucketed averages.
 
         Args:
             device_id: Device identifier
 
         Returns:
-            Dictionary mapping timeframe labels to variance percentages
+            Dictionary mapping timeframe labels to dictionaries containing variance, mean, median, and sample count
         """
         timeframes = {
             '1h': (60, 30),    # 60 minutes, 30 buckets (2-min each)
@@ -410,6 +410,14 @@ class BitaxeDashboard:
                 max_hr = max(hashrates)
                 avg_hr = sum(hashrates) / len(hashrates)
 
+                # Calculate median
+                sorted_hrs = sorted(hashrates)
+                n = len(sorted_hrs)
+                if n % 2 == 0:
+                    median_hr = (sorted_hrs[n//2 - 1] + sorted_hrs[n//2]) / 2
+                else:
+                    median_hr = sorted_hrs[n//2]
+
                 # Calculate variance from bucketed averages
                 if avg_hr > 0:
                     variance_pct = ((max_hr - min_hr) / avg_hr * 100)
@@ -418,6 +426,8 @@ class BitaxeDashboard:
 
                 results[label] = {
                     'variance': round(variance_pct, 1),
+                    'mean': round(avg_hr, 1),
+                    'median': round(median_hr, 1),
                     'samples': len(hashrates)
                 }
             else:
@@ -510,21 +520,36 @@ class BitaxeDashboard:
             if len(self.ping_history[device_id]) > 100:
                 self.ping_history[device_id].pop(0)
 
-            # Calculate average
-            avg_ping = sum(self.ping_history[device_id]) / len(self.ping_history[device_id])
+            # Calculate statistics
+            ping_list = self.ping_history[device_id]
+            avg_ping = sum(ping_list) / len(ping_list)
+            min_ping = min(ping_list)
+            max_ping = max(ping_list)
+
+            # Calculate median
+            sorted_pings = sorted(ping_list)
+            n = len(sorted_pings)
+            if n % 2 == 0:
+                median_ping = (sorted_pings[n//2 - 1] + sorted_pings[n//2]) / 2
+            else:
+                median_ping = sorted_pings[n//2]
 
             # Color code based on current latency
-            if ping_ms < 5:
+            if ping_ms < 50:
                 ping_color = "green"
-            elif ping_ms < 20:
+            elif ping_ms < 100:
                 ping_color = "yellow"
             else:
                 ping_color = "red"
 
-            # Show current and average
+            # Show current with stats
             table.add_row(
                 "Ping:",
-                f"[{ping_color}]{ping_ms:.1f} ms[/{ping_color}] [dim](avg: {avg_ping:.1f} ms, {len(self.ping_history[device_id])} samples)[/dim]"
+                f"[{ping_color}]{ping_ms:.1f} ms[/{ping_color}] [dim](avg: {avg_ping:.1f}, median: {median_ping:.1f})[/dim]"
+            )
+            table.add_row(
+                "Ping Range:",
+                f"[dim]{min_ping:.1f}-{max_ping:.1f} ms ({len(ping_list)} samples)[/dim]"
             )
         else:
             table.add_row("Ping:", "[red]Unreachable[/red]")
@@ -687,7 +712,7 @@ class BitaxeDashboard:
 
         # Stability Analysis Section
         table.add_row("", "")  # Spacer
-        table.add_row("[bold cyan]═══ Hashrate Variability ═══[/bold cyan]", "")
+        table.add_row("[bold cyan]Hash Variance[/bold cyan]", "")
 
         def format_variance(variance_pct: float) -> tuple:
             """Return color and status for variance percentage (BM1370 calibrated)."""
@@ -703,10 +728,21 @@ class BitaxeDashboard:
                 return "red", "Unstable"
 
         # Display variance for each timeframe
+        # Define bucket sizes for clarity
+        bucket_info = {
+            '1h': '2-min buckets',
+            '4h': '5-min buckets',
+            '8h': '10-min buckets',
+            '24h': '1-hour buckets',
+            '3d': '2-hour buckets'
+        }
+
         for timeframe in ['1h', '4h', '8h', '24h', '3d']:
             data = variance_data.get(timeframe)
             if data:
                 variance = data['variance']
+                mean = data['mean']
+                median = data['median']
                 samples = data['samples']
                 color, status = format_variance(variance)
 
@@ -714,9 +750,26 @@ class BitaxeDashboard:
                 bar_blocks = min(int(variance / 10), 10)
                 bar = '█' * bar_blocks
 
+                # Calculate mean-median difference to show skewness
+                mean_median_diff = mean - median
+                if abs(mean_median_diff) < 5:
+                    skew_indicator = ""  # Symmetric distribution
+                elif mean_median_diff > 5:
+                    skew_indicator = " [dim](skewed high)[/dim]"
+                else:
+                    skew_indicator = " [dim](skewed low)[/dim]"
+
                 table.add_row(
                     f"  {timeframe}:",
-                    f"[{color}]{variance:>4.1f}% {bar:<10}[/{color}] [{color}]{status}[/{color}] [dim]({samples} samples)[/dim]"
+                    ""
+                )
+                table.add_row(
+                    f"  [dim]({samples} samples[/dim]",
+                    f"[{color}]{variance:>4.1f}% {bar:<10}[/{color}] [{color}]{status}[/{color}]{skew_indicator}"
+                )
+                table.add_row(
+                    f"  [dim]{bucket_info[timeframe]})[/dim]",
+                    f"[dim]mean: {mean:.0f} GH/s | median: {median:.0f} GH/s[/dim]"
                 )
             else:
                 table.add_row(f"  {timeframe}:", "[dim]No data[/dim]")

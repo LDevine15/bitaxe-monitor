@@ -11,7 +11,7 @@ devices:
     enabled: true
 
 logging:
-  poll_interval: 5           # Seconds between polls (15s recommended for better granularity)
+  poll_interval: 10           # Seconds between polls (15s recommended for better granularity)
   database_path: "./data/metrics.db"
   log_level: "INFO"            # DEBUG, INFO, WARNING, ERROR
 

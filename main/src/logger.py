@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import subprocess
+import platform
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 
@@ -31,6 +33,50 @@ class BitaxeLogger:
 
         # Track device states
         self.device_states: Dict[str, dict] = {}
+
+    def ping_device(self, ip_address: str) -> Optional[float]:
+        """Ping a device and return latency in milliseconds.
+
+        Args:
+            ip_address: IP address to ping
+
+        Returns:
+            Ping latency in ms or None if unreachable
+        """
+        try:
+            system = platform.system().lower()
+
+            # Build platform-specific ping command
+            if system == 'windows':
+                command = ['ping', '-n', '1', '-w', '1000', ip_address]
+            elif system == 'darwin':  # macOS
+                command = ['ping', '-c', '1', '-W', '1000', ip_address]
+            else:  # Linux
+                command = ['ping', '-c', '1', '-W', '1', ip_address]
+
+            result = subprocess.run(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=2,
+                text=True
+            )
+
+            if result.returncode == 0:
+                # Parse ping output for latency
+                output = result.stdout
+                if 'time=' in output.lower():
+                    # Extract time value (works for Linux/Mac/Windows)
+                    for line in output.split('\n'):
+                        if 'time=' in line.lower():
+                            # Find the time= part
+                            time_part = line.lower().split('time=')[1]
+                            # Extract just the number (handle "time=52.212 ms" or "time=52.212ms")
+                            time_str = time_part.split()[0].replace('ms', '').strip()
+                            return float(time_str)
+            return None
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, ValueError, IndexError):
+            return None
 
     async def poll_device(self, device: dict) -> Optional[SystemInfo]:
         """Poll a single device for current metrics.
@@ -154,13 +200,17 @@ class BitaxeLogger:
         )
         self.db.insert_metric(metric)
 
-    def log_status(self, device_name: str, info: SystemInfo):
+    def log_status(self, device_name: str, device_ip: str, info: SystemInfo):
         """Log current device status to console.
 
         Args:
             device_name: Device identifier
+            device_ip: Device IP address
             info: System information
         """
+        # Get ping latency
+        ping_ms = self.ping_device(device_ip)
+
         # Format efficiency with color indicator
         jth = info.efficiency_jth
         if jth < 28:
@@ -180,11 +230,24 @@ class BitaxeLogger:
         else:
             power_str = f"{power:.1f}W"  # Normal
 
+        # Format ping with color coding
+        # ANSI color codes: Green=\033[92m, Yellow=\033[93m, Red=\033[91m, Reset=\033[0m
+        if ping_ms is not None:
+            if ping_ms < 50:
+                ping_str = f"\033[92m{ping_ms:.1f}ms\033[0m"  # Green
+            elif ping_ms < 100:
+                ping_str = f"\033[93m{ping_ms:.1f}ms\033[0m"  # Yellow
+            else:
+                ping_str = f"\033[91m{ping_ms:.1f}ms\033[0m"  # Red
+        else:
+            ping_str = f"\033[91mN/A\033[0m"  # Red for unreachable
+
         logger.info(
             f"{device_name}: "
             f"{info.hashRate:.1f} GH/s | "
             f"{info.temp:.1f}°C | "
             f"{power_str} | "
+            f"{ping_str} | "
             f"{eff_indicator} {jth:.1f} J/TH | "
             f"{info.frequency}MHz@{info.coreVoltage}mV"
         )
@@ -222,8 +285,8 @@ class BitaxeLogger:
                     # Check safety thresholds
                     self.check_safety_thresholds(device_name, info)
 
-                    # Log status
-                    self.log_status(device_name, info)
+                    # Log status with ping
+                    self.log_status(device_name, device_config["ip"], info)
 
                 # Wait for next poll
                 await asyncio.sleep(self.poll_interval)
