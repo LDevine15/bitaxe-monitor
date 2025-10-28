@@ -18,8 +18,8 @@ A Python-based monitoring and analysis tool for Bitaxe ASIC Bitcoin miners. Auto
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
-cd bitaxe-monitor/main
+git clone https://github.com/yourusername/bitaxe-monitor.git
+cd bitaxe-monitor
 
 # Create virtual environment
 python3 -m venv venv
@@ -55,7 +55,7 @@ safety:
 ### 3. Start Logging
 
 ```bash
-python logger.py
+python run_logger.py
 ```
 
 The logger will:
@@ -69,37 +69,38 @@ The logger will:
 
 ```bash
 # View configuration performance summary
-python analyzer.py compare-configs --device bitaxe-1
+python analyze.py compare-configs --device bitaxe-1
 
 # Find optimal configuration for efficiency
-python analyzer.py optimize --metric efficiency
+python analyze.py optimize --metric efficiency
 
 # Export data to CSV
-python analyzer.py export --format csv --output results.csv
+python analyze.py export --format csv --output results.csv
 ```
 
 ## Project Structure
 
 ```
-main/
+bitaxe-monitor/
 ├── README.md                   # This file
+├── LICENSE                     # MIT License
 ├── plan.md                     # Detailed design document
 ├── requirements.txt            # Python dependencies
-├── config.yaml                 # Device configuration
+├── config.yaml.example         # Example configuration
+├── config.yaml                 # Device configuration (gitignored)
+│
+├── run_logger.py               # Main entry point
+├── analyze.py                  # Analysis CLI
+├── dashboard.py                # Real-time dashboard
 │
 ├── src/                        # Source code
 │   ├── api_client.py          # Bitaxe REST API client
 │   ├── database.py            # SQLite operations
 │   ├── models.py              # Data models
 │   ├── logger.py              # Main logging daemon
-│   ├── session.py             # Session management
-│   ├── analyzer.py            # Analysis tools
-│   └── utils.py               # Helpers
+│   └── analyzer.py            # Analysis tools
 │
 ├── cli/                        # CLI commands
-│   ├── logger_cli.py
-│   ├── session_cli.py
-│   └── analyze_cli.py
 │
 ├── tests/                      # Unit tests
 │
@@ -109,8 +110,6 @@ main/
 │   └── exports/               # Exported data
 │
 └── docs/                       # Documentation
-    ├── API.md                 # Bitaxe API reference
-    └── EXAMPLES.md            # Usage examples
 ```
 
 ## Usage Examples
@@ -120,7 +119,7 @@ main/
 Just run the logger and change settings via the Bitaxe web UI whenever you want. Data is automatically segmented by configuration.
 
 ```bash
-python logger.py
+python run_logger.py
 # Leave running 24/7
 # Change clock settings via web UI as desired
 # Analyze results later
@@ -132,7 +131,7 @@ For structured experiments with explicit session tracking:
 
 ```bash
 # Start test session
-python logger.py session start \
+python run_logger.py session start \
   --device bitaxe-1 \
   --freq 600 --voltage 1200 \
   --notes "Overnight test, ambient 22°C"
@@ -140,10 +139,10 @@ python logger.py session start \
 # (Wait 8 hours)
 
 # End session
-python logger.py session end --device bitaxe-1
+python run_logger.py session end --device bitaxe-1
 
 # Start next test
-python logger.py session start \
+python run_logger.py session start \
   --device bitaxe-1 \
   --freq 625 --voltage 1250 \
   --notes "Morning test, ambient 18°C"
@@ -162,10 +161,10 @@ python logger.py session start \
 # Set 600MHz @ 1250mV via web UI
 
 # 4. Analyze results
-python analyzer.py compare-configs --device bitaxe-1
+python analyze.py compare-configs --device bitaxe-1
 
 # 5. Generate report
-python reporter.py generate --days 1 --output report.md
+python dashboard.py
 ```
 
 ## Key Metrics
