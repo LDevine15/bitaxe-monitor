@@ -125,6 +125,36 @@ class BitaxeDashboard:
             return round(row[0], 1)
         return None
 
+    def get_uptime_average_efficiency(self, device_id: str, uptime_seconds: int) -> Optional[float]:
+        """Get average efficiency during the current uptime period.
+
+        Args:
+            device_id: Device identifier
+            uptime_seconds: Current uptime in seconds
+
+        Returns:
+            Average efficiency (J/TH) or None if no data
+        """
+        from datetime import timedelta
+
+        # Calculate when device was rebooted
+        reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
+
+        # Query average efficiency since reboot
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT AVG(efficiency_jth) as avg_efficiency
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+              AND efficiency_jth IS NOT NULL
+        """, (device_id, reboot_time))
+
+        row = cursor.fetchone()
+        if row and row[0]:
+            return round(row[0], 1)
+        return None
+
     def _get_session_metric_stats(self, device_id: str, uptime_seconds: int, metric: str, precision: int = 2) -> Optional[Dict]:
         """Get statistics for a metric during the current uptime session.
 
@@ -171,6 +201,43 @@ class BitaxeDashboard:
     def get_session_current_stats(self, device_id: str, uptime_seconds: int) -> Optional[Dict]:
         """Get current draw statistics during the current uptime session."""
         return self._get_session_metric_stats(device_id, uptime_seconds, 'current', precision=2)
+
+    def get_power_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
+        """Get power statistics for a specific timeframe.
+
+        Args:
+            device_id: Device identifier
+            hours: Lookback period in hours
+
+        Returns:
+            Dictionary with min, max, avg, samples or None if no data
+        """
+        from datetime import timedelta
+
+        lookback_time = datetime.now() - timedelta(hours=hours)
+
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT
+                MIN(power) as min_power,
+                MAX(power) as max_power,
+                AVG(power) as avg_power,
+                COUNT(*) as sample_count
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+              AND power IS NOT NULL
+        """, (device_id, lookback_time))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None and row[3] > 0:
+            return {
+                'min': round(row[0], 2),
+                'max': round(row[1], 2),
+                'avg': round(row[2], 2),
+                'samples': row[3]
+            }
+        return None
 
     def get_hashrate_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
         """Get hashrate statistics for a specific timeframe.
@@ -683,12 +750,13 @@ class BitaxeDashboard:
         if not latest:
             return self._create_no_data_panel(device_id, device_ip, "No data available")
 
-        # Get uptime and calculate average
+        # Get uptime and calculate averages
         uptime_seconds = latest['uptime']
         avg_hashrate = self.get_uptime_average_hashrate(device_id, uptime_seconds)
+        avg_efficiency = self.get_uptime_average_efficiency(device_id, uptime_seconds)
 
-        # Get session power statistics
-        power_stats = self.get_session_power_stats(device_id, uptime_seconds)
+        # Get 8-hour power statistics
+        power_stats = self.get_power_stats_timeframe(device_id, 8)
 
         # Get multi-timeframe variance
         variance_data = self.get_multi_timeframe_variance(device_id)
@@ -705,8 +773,7 @@ class BitaxeDashboard:
         # Configuration (prominent at top)
         freq = latest['frequency']
         core_v = latest['core_voltage']
-        table.add_row("Frequency:", f"[bold cyan]{freq} MHz[/bold cyan]")
-        table.add_row("Core Voltage:", f"[bold cyan]{core_v} mV[/bold cyan]")
+        table.add_row("Config:", f"[bold cyan]{freq} MHz @ {core_v} mV[/bold cyan]")
 
         # Ping latency
         ping_ms = self.ping_device(device_ip)
@@ -750,24 +817,19 @@ class BitaxeDashboard:
 
         table.add_row("", "")  # Spacer
 
-        # Hashrate with bar (current)
+        # Hashrate (current) and average
         hashrate = latest['hashrate']
-        expected = 600  # Approximate max for BM1366
-        hashrate_pct = min(int(hashrate / expected * 100), 100)
         hashrate_color = "green" if hashrate > 500 else "yellow" if hashrate > 400 else "red"
-        table.add_row(
-            "Hashrate:",
-            f"[{hashrate_color}]{hashrate:.1f} GH/s[/{hashrate_color}] {'█' * (hashrate_pct // 10)}"
-        )
 
-        # Average hashrate during uptime
         if avg_hashrate:
-            avg_diff = hashrate - avg_hashrate
-            avg_sign = "+" if avg_diff >= 0 else ""
-            avg_color = "green" if avg_diff >= 0 else "red"
             table.add_row(
-                "Avg (uptime):",
-                f"{avg_hashrate:.1f} GH/s [{avg_color}]({avg_sign}{avg_diff:.1f})[/{avg_color}]"
+                "Hashrate:",
+                f"[{hashrate_color}]{hashrate:.1f} GH/s[/{hashrate_color}] [dim](Avg: {avg_hashrate:.1f})[/dim]"
+            )
+        else:
+            table.add_row(
+                "Hashrate:",
+                f"[{hashrate_color}]{hashrate:.1f} GH/s[/{hashrate_color}]"
             )
 
         # Hashrate trend graphs with labels
@@ -787,6 +849,22 @@ class BitaxeDashboard:
             table.add_row(
                 "Trend (24h):",
                 f"[blue]{sparkline_24h}[/blue] [dim]({min_24h:.0f}-{max_24h:.0f} GH/s)[/dim]"
+            )
+
+        # Efficiency
+        efficiency = latest['efficiency_jth']
+        eff_color = "green" if efficiency < 28 else "yellow" if efficiency < 32 else "red"
+        eff_icon = "🟢" if efficiency < 28 else "🟡" if efficiency < 32 else "🔴"
+
+        if avg_efficiency:
+            table.add_row(
+                "Efficiency:",
+                f"{eff_icon} [{eff_color}]{efficiency:.1f} J/TH[/{eff_color}] [dim](Avg: {avg_efficiency:.1f})[/dim]"
+            )
+        else:
+            table.add_row(
+                "Efficiency:",
+                f"{eff_icon} [{eff_color}]{efficiency:.1f} J/TH[/{eff_color}]"
             )
 
         # Uptime - show both session and total
@@ -838,7 +916,7 @@ class BitaxeDashboard:
             f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of 30W)"
         )
 
-        # Session power range
+        # 8-hour power range
         if power_stats:
             power_range = power_stats['max'] - power_stats['min']
             power_avg = power_stats['avg']
@@ -857,7 +935,7 @@ class BitaxeDashboard:
                 stability = "Unstable"
 
             table.add_row(
-                "Session Range:",
+                "Watts (Last 8h):",
                 f"[{range_color}]{range_str}[/{range_color}] [dim]({stability}, {power_stats['samples']} samples)[/dim]"
             )
 
@@ -867,15 +945,6 @@ class BitaxeDashboard:
         table.add_row(
             "Input V:",
             f"[{voltage_color}]{voltage:.2f}V[/{voltage_color}]"
-        )
-
-        # Efficiency
-        efficiency = latest['efficiency_jth']
-        eff_color = "green" if efficiency < 28 else "yellow" if efficiency < 32 else "red"
-        eff_icon = "🟢" if efficiency < 28 else "🟡" if efficiency < 32 else "🔴"
-        table.add_row(
-            "Efficiency:",
-            f"{eff_icon} [{eff_color}]{efficiency:.1f} J/TH[/{eff_color}]"
         )
 
         # Fan
@@ -911,6 +980,20 @@ class BitaxeDashboard:
                 "Reject Rate:",
                 f"[{reject_color}]{reject_rate:.2f}%[/{reject_color}]"
             )
+
+            # Rejection reasons breakdown (right below reject rate)
+            rejection_reasons_json = latest.get('rejection_reasons')
+            if rejection_reasons_json:
+                import json
+                try:
+                    rejection_reasons = json.loads(rejection_reasons_json)
+                    if rejection_reasons and len(rejection_reasons) > 0:
+                        for reason in rejection_reasons:
+                            message = reason.get('message', 'Unknown')
+                            count = reason.get('count', 0)
+                            table.add_row(f"  {message}:", f"[yellow]{count}[/yellow]")
+                except json.JSONDecodeError:
+                    pass
         else:
             table.add_row("Shares:", "[dim]No shares submitted yet[/dim]")
 
@@ -923,22 +1006,6 @@ class BitaxeDashboard:
         best_diff = latest.get('best_diff')
         if best_diff:
             table.add_row("Best Diff:", f"[bold green]{self.format_difficulty(best_diff)}[/bold green]")
-
-        # Rejection reasons breakdown
-        rejection_reasons_json = latest.get('rejection_reasons')
-        if rejection_reasons_json:
-            import json
-            try:
-                rejection_reasons = json.loads(rejection_reasons_json)
-                if rejection_reasons and len(rejection_reasons) > 0:
-                    table.add_row("", "")  # Spacer
-                    table.add_row("  [dim]Rejection Breakdown:[/dim]", "")
-                    for reason in rejection_reasons:
-                        message = reason.get('message', 'Unknown')
-                        count = reason.get('count', 0)
-                        table.add_row(f"    {message}:", f"[yellow]{count} shares[/yellow]")
-            except json.JSONDecodeError:
-                pass
 
         # Stability Analysis Section
         table.add_row("", "")  # Spacer
@@ -960,11 +1027,11 @@ class BitaxeDashboard:
         # Display variance for each timeframe
         # Define bucket sizes for clarity
         bucket_info = {
-            '1h': '2-min buckets',
-            '4h': '5-min buckets',
-            '8h': '10-min buckets',
-            '24h': '1-hour buckets',
-            '3d': '2-hour buckets'
+            '1h': '2-min',
+            '4h': '5-min',
+            '8h': '10-min',
+            '24h': '1-hour',
+            '3d': '2-hour'
         }
 
         for timeframe in ['1h', '4h', '8h', '24h', '3d']:
@@ -990,15 +1057,11 @@ class BitaxeDashboard:
                     skew_indicator = " [dim](skewed low)[/dim]"
 
                 table.add_row(
-                    f"  {timeframe}:",
-                    ""
-                )
-                table.add_row(
-                    f"  [dim]({samples} samples[/dim]",
+                    f"  {timeframe} [dim]({bucket_info[timeframe]})[/dim]:",
                     f"[{color}]{variance:>4.1f}% {bar:<10}[/{color}] [{color}]{status}[/{color}]{skew_indicator}"
                 )
                 table.add_row(
-                    f"  [dim]{bucket_info[timeframe]})[/dim]",
+                    "",
                     f"[dim]mean: {mean:.0f} GH/s | median: {median:.0f} GH/s[/dim]"
                 )
             else:
