@@ -90,7 +90,7 @@ class Analyzer:
             JOIN clock_configs cc ON pm.config_id = cc.id
             WHERE pm.device_id = ? {time_filter}
             GROUP BY cc.id
-            ORDER BY avg_hashrate DESC
+            ORDER BY cc.frequency DESC, cc.core_voltage DESC
         """
 
         cursor = self.db.conn.cursor()
