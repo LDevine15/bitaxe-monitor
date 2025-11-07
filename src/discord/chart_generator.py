@@ -179,7 +179,9 @@ class ChartGenerator:
 
         # Use 5-minute buckets consistently for cleaner data
         bucket_minutes = 5
-        buckets = min(144, minutes // 5)
+        # Allow enough buckets to support 24h MA (need 288 buckets minimum for 24h)
+        # Cap at 576 buckets (48 hours at 5-min intervals) to keep chart reasonable
+        buckets = min(576, minutes // 5)
 
         # Sum hashrates across all devices
         all_trends = []
@@ -203,20 +205,12 @@ class ChartGenerator:
         now = datetime.now()
         timestamps = [now - timedelta(minutes=minutes * (buckets - i - 1) / buckets) for i in range(buckets)]
 
-        # Calculate adaptive moving averages based on timeframe
-        # Use relaxed smoothing for small timeframes to avoid noise
-        if hours <= 4:
-            # ≤4h: 5-min buckets, use 5-min and 15-min MAs (relaxed)
-            ma_short = self._calculate_moving_average(swarm_trend, window=1)  # 1 * 5min = 5min
-            ma_long = self._calculate_moving_average(swarm_trend, window=3)  # 3 * 5min = 15min
-            ma_short_label = '5-min MA'
-            ma_long_label = '15-min MA'
-        else:
-            # >4h: 5-min buckets, use 15-min and 1h MAs
-            ma_short = self._calculate_moving_average(swarm_trend, window=3)  # 3 * 5min = 15min
-            ma_long = self._calculate_moving_average(swarm_trend, window=12)  # 12 * 5min = 1h
-            ma_short_label = '15-min MA'
-            ma_long_label = '1h MA'
+        # Calculate consistent moving averages for all timeframes
+        # 15-min MA for short-term trends, 24h MA for long-term trends
+        ma_short = self._calculate_moving_average(swarm_trend, window=3)  # 3 * 5min = 15min
+        ma_long = self._calculate_moving_average(swarm_trend, window=288)  # 288 * 5min = 24h
+        ma_short_label = '15-min MA'
+        ma_long_label = '24h MA'
 
         # Create figure
         fig, ax = plt.subplots(figsize=self.figsize)
@@ -321,17 +315,11 @@ class ChartGenerator:
         # Get data
         minutes = hours * 60
 
-        # Use 5-minute buckets consistently, adjust MA smoothing
+        # Use 5-minute buckets consistently
         bucket_minutes = 5
-        buckets = min(144, minutes // 5)
-
-        # Use relaxed smoothing for small timeframes
-        if hours <= 4:
-            ma_window = 1  # 5-min MA (raw, less smoothing)
-            ma_label = '5-min MA'
-        else:
-            ma_window = 3  # 15-min MA
-            ma_label = '15-min MA'
+        # Allow enough buckets to support 24h MA (need 288 buckets minimum for 24h)
+        # Cap at 576 buckets (48 hours at 5-min intervals) to keep chart reasonable
+        buckets = min(576, minutes // 5)
 
         # Generate timestamps
         now = datetime.now()
@@ -352,8 +340,8 @@ class ChartGenerator:
             # Get hashrate trend
             hashrate_trend = self.db.get_bucketed_hashrate_trend(device_id, minutes, buckets)
 
-            # Smooth hashrate with adaptive moving average
-            hashrate_ma = self._calculate_moving_average(hashrate_trend, window=ma_window)
+            # Calculate 15-min MA for hashrate (consistent across all timeframes)
+            hashrate_ma = self._calculate_moving_average(hashrate_trend, window=3)  # 15-min MA
 
             # Collect valid hashrates for axis scaling
             valid_hr = [h for h in hashrate_ma if h is not None]
@@ -366,14 +354,14 @@ class ChartGenerator:
             # Get temperature trend
             temp_trend = self.db.get_bucketed_temp_trend(device_id, minutes, buckets)
 
-            # Smooth temperature with adaptive moving average
-            temp_ma = self._calculate_moving_average(temp_trend, window=ma_window)
+            # Calculate 15-min MA for temperature
+            temp_ma = self._calculate_moving_average(temp_trend, window=3)  # 15-min MA
 
             # Collect valid temps for axis scaling
             valid_temps = [t for t in temp_ma if t is not None]
             all_temps.extend(valid_temps)
 
-            # Plot smoothed temperature as a thin line
+            # Plot smoothed temperature as a thin dotted line
             ax2.plot(timestamps, temp_ma, '--', color=color, linewidth=1.5,
                     alpha=0.5)
 
@@ -393,12 +381,12 @@ class ChartGenerator:
         ax1.grid(True, alpha=0.3)
 
         # Legends
-        ax1.legend(loc='upper left', framealpha=0.8, title=f'Hashrate ({ma_label}, solid lines)')
+        ax1.legend(loc='upper left', framealpha=0.8, title='Hashrate (15-min MA, solid lines)')
 
         # Add note about temperature lines
         if all_temps:
             temp_avg = sum(all_temps) / len(all_temps)
-            ax2.text(0.98, 0.02, f'Temp ({ma_label}, dashed)\nAvg: {temp_avg:.1f}°C',
+            ax2.text(0.98, 0.02, f'Temp (15-min MA, dashed)\nAvg: {temp_avg:.1f}°C',
                     transform=ax2.transAxes, fontsize=9, va='bottom', ha='right',
                     color='#FF6B6B', bbox=dict(boxstyle='round', facecolor='black', alpha=0.5))
 
@@ -477,21 +465,11 @@ class ChartGenerator:
         # Get data
         minutes = hours * 60
 
-        # Use 5-minute buckets consistently, adjust MA windows
+        # Use 5-minute buckets consistently
         bucket_minutes = 5
-        buckets = min(144, minutes // 5)
-
-        # Use relaxed smoothing for small timeframes
-        if hours <= 4:
-            ma_short_window = 1  # 5-min MA (raw)
-            ma_long_window = 3  # 15-min MA
-            ma_short_label = '5-min MA'
-            ma_long_label = '15-min MA'
-        else:
-            ma_short_window = 3  # 15-min MA
-            ma_long_window = 12  # 1h MA
-            ma_short_label = '15-min MA'
-            ma_long_label = '1h MA'
+        # Allow enough buckets to support 24h MA (need 288 buckets minimum for 24h)
+        # Cap at 576 buckets (48 hours at 5-min intervals) to keep chart reasonable
+        buckets = min(576, minutes // 5)
 
         hashrate_trend = self.db.get_bucketed_hashrate_trend(device_id, minutes, buckets)
         temp_trend = self.db.get_bucketed_temp_trend(device_id, minutes, buckets)
@@ -504,9 +482,11 @@ class ChartGenerator:
         fig, ax1 = plt.subplots(figsize=self.figsize)
         ax2 = ax1.twinx()
 
-        # Calculate adaptive moving averages for hashrate
-        ma_short = self._calculate_moving_average(hashrate_trend, window=ma_short_window)
-        ma_long = self._calculate_moving_average(hashrate_trend, window=ma_long_window)
+        # Calculate consistent moving averages for hashrate (15-min and 24h)
+        ma_short = self._calculate_moving_average(hashrate_trend, window=3)  # 15-min MA
+        ma_long = self._calculate_moving_average(hashrate_trend, window=288)  # 24h MA
+        ma_short_label = '15-min MA'
+        ma_long_label = '24h MA'
 
         # Plot hashrate with both MAs
         ax1.plot(timestamps, ma_short, '-', color='#00FFFF', linewidth=2.5,
@@ -514,10 +494,10 @@ class ChartGenerator:
         ax1.plot(timestamps, ma_long, '-', color='#FFD700', linewidth=3,
                 label=ma_long_label, alpha=0.95)
 
-        # Smooth and plot temperature
-        temp_ma = self._calculate_moving_average(temp_trend, window=ma_short_window)
-        ax2.plot(timestamps, temp_ma, '-', color='#FF6B6B', linewidth=2,
-                label=f'ASIC Temp ({ma_short_label})', alpha=0.7, marker='s', markersize=2)
+        # Smooth and plot temperature as dotted line
+        temp_ma = self._calculate_moving_average(temp_trend, window=3)  # 15-min MA
+        ax2.plot(timestamps, temp_ma, '--', color='#FF6B6B', linewidth=1.5,
+                label='ASIC Temp (15-min MA)', alpha=0.7)
 
         # Formatting
         ax1.set_xlabel('Time')

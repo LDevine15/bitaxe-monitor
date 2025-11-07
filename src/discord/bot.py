@@ -780,7 +780,8 @@ class BitaxeBot(commands.Bot):
 `{prefix}miner bitaxe-1 7d` - Individual miner, 7d (trends)
 
 **Info**
-Charts use adaptive MAs (≤4h: 5min/15min, >4h: 15min/1h) with 20% y-axis padding
+Charts use 15-min and 24h moving averages with 20% y-axis padding
+Temps shown as dotted lines with 15-min MA
 Hourly auto-reports post 12h charts to #{self.config.auto_report.channel_name}
 Weekly reports post 7d charts every Monday
 Monitoring {len(self.devices)} devices
