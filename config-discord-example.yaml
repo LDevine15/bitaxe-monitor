@@ -1,0 +1,72 @@
+# Bitaxe Monitor Configuration with Discord Bot
+# Copy this to config.yaml and update with your settings
+
+devices:
+  - name: "bitaxe-1"
+    ip: "192.168.1.149"
+    enabled: true
+
+  - name: "bitaxe-2"
+    ip: "192.168.1.44"
+    enabled: true
+
+  - name: "bitaxe-3"
+    ip: "192.168.1.78"
+    enabled: true
+
+  - name: "bitaxe-4"
+    ip: "192.168.1.236"
+    enabled: true
+
+logging:
+  poll_interval: 10               # Data collection interval (10s recommended)
+  database_path: "./data/metrics.db"
+  log_level: "INFO"
+
+safety:
+  max_temp_warning: 65            # °C - Log warning
+  max_temp_shutdown: 70           # °C - Emergency alert
+  min_hashrate_warning: 400       # GH/s - Alert if hashrate drops
+
+# Discord Bot Configuration
+discord:
+  enabled: true
+  token: "${DISCORD_BOT_TOKEN}"   # Set via environment variable
+  command_prefix: "!"             # Commands will be: !status, !report, etc.
+
+  # Optional: Restrict bot to specific channels (leave empty for all channels)
+  allowed_channels: []
+    # - 1234567890123456789       # Uncomment and add your channel ID
+
+  # Auto-reporting: Posts summary every hour
+  auto_report:
+    enabled: true
+    channel_name: "swarm"             # For reference only
+    channel_id: 1234567890123456789   # REQUIRED: Your Discord channel ID (see setup guide)
+    schedule: "0 * * * *"             # Every hour on the hour (24 reports/day)
+    include_charts: true              # Attach hashrate/temp charts
+
+    # Graph settings
+    graph_lookback_hours: 12          # Show last 12 hours in graphs
+    show_moving_averages: true        # Include 1h and 24h MA lines
+
+    # Stats display
+    show_1h_average: true             # Show 1-hour rolling average
+    show_24h_average: true            # Show 24-hour rolling average
+
+  # Chart generation settings
+  charts:
+    dpi: 150                      # Image quality: 72=draft, 150=good, 300=print
+    style: "dark_background"      # Matches Discord dark theme
+    figsize: [14, 7]             # Width x Height in inches
+    cache_ttl: 300                # Cache charts for 5 minutes
+
+  # Command-specific settings
+  commands:
+    status:
+      cooldown: 10                # Seconds between uses per user
+    report:
+      cooldown: 60                # Seconds between uses per user
+      max_hours: 168              # Max lookback (7 days)
+    miner:
+      cooldown: 30                # Seconds between uses per user

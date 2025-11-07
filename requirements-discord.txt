@@ -1,0 +1,18 @@
+# Discord Bot Dependencies
+# Install with: pip install -r requirements-discord.txt
+
+# Discord API
+discord.py>=2.3.0           # Discord bot framework
+
+# Environment variables
+python-dotenv>=1.0          # Load .env files (already in main requirements)
+
+# Scheduling for auto-reports
+APScheduler>=3.10.0         # Cron-style job scheduling
+
+# Already in requirements.txt but needed for bot:
+# - pyyaml>=6.0
+# - pydantic>=2.0
+# - matplotlib>=3.7
+# - pandas>=2.0
+# - numpy>=1.24

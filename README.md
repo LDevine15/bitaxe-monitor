@@ -4,12 +4,27 @@ A Python-based monitoring and analysis tool for Bitaxe ASIC Bitcoin miners. Auto
 
 ## Features
 
+### Core Monitoring
 - **Multi-device monitoring**: Poll multiple Bitaxe miners simultaneously
 - **Automatic config detection**: Segments data by frequency/voltage settings
 - **Time-series storage**: SQLite database with efficient indexing
 - **Efficiency calculations**: J/TH and GH/W metrics computed in real-time
 - **Analysis tools**: Compare configurations, identify optimal settings
 - **Safety monitoring**: Temperature warnings and alerts
+
+### Terminal Dashboard
+- **Real-time dashboard**: Live terminal UI with Rich formatting
+- **Variance analysis**: Multi-timeframe hashrate stability metrics
+- **Uptime tracking**: Automatic restart detection with total uptime
+- **Performance trends**: Sparkline graphs and moving averages
+- **Lite mode**: Compact view for monitoring 4+ miners
+
+### Discord Bot (New!)
+- **Auto-reporting**: Hourly status updates to Discord channel
+- **Smart averaging**: 1h averages for reliable hashrate/efficiency stats
+- **Chart generation**: Swarm and per-miner performance graphs
+- **Interactive commands**: On-demand stats, reports, and health checks
+- **Moving averages**: 1h and 24h MA overlays on 12h graphs
 
 ## Quick Start
 
@@ -51,12 +66,19 @@ safety:
   max_temp_shutdown: 70
 ```
 
-### 3. Start Logging
+### 3. Start Monitoring
 
 ```bash
-python run_logger.py  # Start logging (REQUIRED FOR DASHBOARD TO RUN)
-python dashboard.py   # Start full dashboard
-python dashboard.py --lite  # Start lite dashboard (better for 3+ miners)
+# Start data collection (required)
+python run_logger.py
+
+# Terminal dashboard
+python dashboard.py         # Full dashboard fits 1-4 easily 
+python dashboard.py --lite  # Compact view for 4+ miners
+
+# Discord bot
+pip install -r requirements-discord.txt
+python discord_bot.py       # See Discord setup below
 ```
 
 The logger will:
@@ -85,29 +107,75 @@ python stats.py export bitaxe-1 results.csv
 bitaxe-monitor/
 ├── README.md                   # This file
 ├── LICENSE                     # MIT License
-├── plan.md                     # Detailed design document
-├── requirements.txt            # Python dependencies
+├── requirements.txt            # Core dependencies
+├── requirements-discord.txt    # Discord bot dependencies
 ├── config.yaml.example         # Example configuration
-├── config.yaml                 # Device configuration (gitignored)
+├── config-discord-example.yaml # Discord bot config example
 │
-├── run_logger.py               # Main entry point
+├── run_logger.py               # Data collection daemon
+├── dashboard.py                # Real-time terminal dashboard
+├── discord_bot.py              # Discord bot entry point
 ├── stats.py                    # Statistics & analysis CLI
-├── dashboard.py                # Real-time dashboard
 │
 ├── src/                        # Source code
 │   ├── api_client.py          # Bitaxe REST API client
 │   ├── database.py            # SQLite operations
 │   ├── models.py              # Data models
 │   ├── logger.py              # Main logging daemon
-│   └── analyzer.py            # Analysis tools
+│   ├── analyzer.py            # Analysis tools
+│   └── discord/               # Discord bot module
+│       ├── bot.py             # Bot commands & logic
+│       ├── config.py          # Discord configuration
+│       ├── chart_generator.py # Graph generation (Phase 2)
+│       └── embed_builder.py   # Discord embeds (Phase 2)
 │
 ├── data/                       # Data directory (gitignored)
 │   ├── metrics.db             # SQLite database
-│   ├── logs/                  # Application logs
-│   └── exports/               # Exported data
+│   ├── charts/                # Generated chart images
+│   └── *.log                  # Application logs
 │
 └── docs/                       # Documentation
+    ├── discord-bot.md         # Discord bot implementation plan
+    ├── discord-setup.md       # Discord bot setup guide
+    └── GET-CHANNEL-ID.md      # Quick Discord channel ID guide
 ```
+
+## Discord Bot Setup
+
+### Quick Start
+
+1. **Create Discord bot** at https://discord.com/developers/applications
+2. **Enable intents**: MESSAGE CONTENT intent (required)
+3. **Get bot token** and **channel ID** (see `docs/discord-setup.md`)
+4. **Create `.env` file**:
+   ```bash
+   echo "DISCORD_BOT_TOKEN=your_token_here" > .env
+   ```
+5. **Update `config.yaml`** with Discord section (see `config-discord-example.yaml`)
+6. **Install dependencies**:
+   ```bash
+   pip install -r requirements-discord.txt
+   ```
+7. **Start the bot**:
+   ```bash
+   python discord_bot.py
+   ```
+
+### Discord Commands
+
+```
+!stats         # Quick stats with 1h averages
+!report        # Full report with charts (Phase 2)
+!miner <name>  # Individual miner details
+!health        # Check for warnings
+!help          # Command list
+```
+
+**Auto-reports**: Posts to your Discord channel every hour with swarm stats and per-miner performance.
+
+See full setup guide: `docs/discord-setup.md`
+
+---
 
 ## Usage Examples
 
@@ -134,13 +202,18 @@ python stats.py compare bitaxe-1
 - **Temperature**: ASIC and voltage regulator temps in °C
 - **Power**: Total power consumption in watts
 
+## Security & Privacy
+
+### Running Locally
+- Everything runs on your local network
+- No cloud services or external APIs (except Discord bot if enabled)
+- Database is local SQLite file
+- Only you can access your data
+---
+
 ## Safety Notes
 
-- Monitor temperatures continuously
-- Keep ASIC temp below 65°C for longevity
-- Recommended voltage range: 1150-1250mV
-- Recommended frequency range: 550-600MHz
-- Use adequate cooling and ventilation
+- All overclocking is done at your own risk
 ## References
 
 - [ESP-Miner Firmware](https://github.com/bitaxeorg/ESP-Miner)
