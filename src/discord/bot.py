@@ -218,8 +218,8 @@ class BitaxeBot(commands.Bot):
         # Calculate efficiency from 1h averages
         avg_efficiency = (avg_power_1h / (avg_hashrate_1h / 1000.0)) if avg_hashrate_1h > 0 else 0
 
-        # Compact swarm summary
-        lines.append(f"\x1b[0;36m{avg_hashrate_1h:.1f}GH/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{avg_power_1h:.1f}W\x1b[0m")
+        # Compact swarm summary - convert to TH/s
+        lines.append(f"\x1b[0;36m{avg_hashrate_1h/1000:.2f} Th/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{avg_power_1h:.1f}W\x1b[0m")
         lines.append("")
 
         for device in self.devices:
@@ -262,8 +262,8 @@ class BitaxeBot(commands.Bot):
             # Compact uptime
             uptime_str = f"{int(uptime_hours//24)}d" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
 
-            # Super compact format - one line per miner
-            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq}MHz \x1b[0;36m{avg_hashrate:.0f}GH/s\x1b[0m \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
+            # Super compact format - one line per miner - convert to TH/s
+            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq} MHz \x1b[0;36m{avg_hashrate/1000:.2f} TH/s\x1b[0m \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
 
         lines.append("```")
         return "\n".join(lines)
@@ -294,8 +294,8 @@ class BitaxeBot(commands.Bot):
 
         avg_efficiency = (total_power / (total_hashrate / 1000.0)) if total_hashrate > 0 else 0
 
-        # Swarm summary line
-        lines.append(f"\x1b[0;36m{total_hashrate:.1f}GH/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{total_power:.1f}W\x1b[0m")
+        # Swarm summary line - convert to TH/s
+        lines.append(f"\x1b[0;36m{total_hashrate/1000:.2f} Th/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{total_power:.1f}W\x1b[0m")
         lines.append("")
 
         for device in self.devices:
@@ -323,8 +323,8 @@ class BitaxeBot(commands.Bot):
             # Compact uptime
             uptime_str = f"{int(uptime_hours//24)}d" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
 
-            # Current values format
-            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq}MHz \x1b[0;36m{hashrate:.0f}GH/s\x1b[0m \x1b[0;36m{efficiency:.1f} J/TH\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
+            # Current values format - convert to TH/s
+            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq} MHz \x1b[0;36m{hashrate/1000:.2f} Th/s\x1b[0m \x1b[0;36m{efficiency:.1f} J/TH\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
 
         lines.append("```")
         return "\n".join(lines)
