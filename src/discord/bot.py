@@ -1,5 +1,6 @@
 """Discord bot for Bitaxe monitoring."""
 
+import io
 import logging
 from datetime import datetime
 from typing import Optional
@@ -12,6 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from ..database import Database
 from ..analyzer import Analyzer
 from .config import DiscordConfig
+from .chart_generator import ChartGenerator
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +45,15 @@ class BitaxeBot(commands.Bot):
         self.devices = [d for d in devices if d.get('enabled', True)]
         self.scheduler = AsyncIOScheduler()
 
+        # Initialize chart generator
+        chart_config = {
+            'dpi': config.charts.dpi,
+            'figsize': config.charts.figsize,
+            'style': config.charts.style,
+            'cache_ttl': config.charts.cache_ttl,
+        }
+        self.chart_generator = ChartGenerator(database, chart_config)
+
         # Register commands
         self.add_commands()
 
@@ -50,19 +61,19 @@ class BitaxeBot(commands.Bot):
         """Register bot commands."""
 
         @self.command(name='status')
-        @commands.cooldown(1, self.config.commands.status_cooldown, commands.BucketType.user)
+        # @commands.cooldown(1, self.config.commands.status_cooldown, commands.BucketType.user)  # Disabled for testing
         async def status_command(ctx):
             """Show instant snapshot of all miners."""
             await self.cmd_status(ctx)
 
         @self.command(name='stats')
-        @commands.cooldown(1, self.config.commands.status_cooldown, commands.BucketType.user)
+        # @commands.cooldown(1, self.config.commands.status_cooldown, commands.BucketType.user)  # Disabled for testing
         async def stats_command(ctx):
             """Show 1h averaged stats of all miners."""
             await self.cmd_stats(ctx)
 
         @self.command(name='report')
-        @commands.cooldown(1, self.config.commands.report_cooldown, commands.BucketType.user)
+        # @commands.cooldown(1, self.config.commands.report_cooldown, commands.BucketType.user)  # Disabled for testing
         async def report_command(ctx, hours: int = 24):
             """Generate detailed performance report.
 
@@ -72,7 +83,7 @@ class BitaxeBot(commands.Bot):
             await self.cmd_report(ctx, hours)
 
         @self.command(name='miner')
-        @commands.cooldown(1, self.config.commands.miner_cooldown, commands.BucketType.user)
+        # @commands.cooldown(1, self.config.commands.miner_cooldown, commands.BucketType.user)  # Disabled for testing
         async def miner_command(ctx, name: str):
             """Show detailed stats for a specific miner.
 
@@ -352,7 +363,7 @@ class BitaxeBot(commands.Bot):
         await ctx.send(report)
 
     async def cmd_report(self, ctx, hours: int):
-        """Handle !report command (will add charts in Phase 2)."""
+        """Handle !report command with charts."""
         logger.info(f"!report {hours} command from {ctx.author.name}")
 
         # Check channel restrictions
@@ -364,14 +375,41 @@ class BitaxeBot(commands.Bot):
             await ctx.send(f"❌ Hours must be between 1 and {self.config.commands.report_max_hours}")
             return
 
-        # For Phase 1, just show status + message about charts coming
-        report = self.generate_status_report()
-        report += f"\n\n*📊 Charts coming in Phase 2! (requested {hours}h lookback)*"
+        # Send status message first
+        await ctx.send(f"📊 Generating {hours}h performance report with charts...")
 
-        await ctx.send(report)
+        try:
+            # Get device IDs
+            device_ids = [d['name'] for d in self.devices]
+
+            # Generate charts
+            logger.info("Generating swarm hashrate chart...")
+            swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
+
+            logger.info("Generating miner detail chart...")
+            miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
+
+            # Create Discord files
+            swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
+            miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
+
+            # Generate text report
+            report = self.generate_status_report()
+
+            # Send with attachments
+            await ctx.send(
+                content=f"**⛏️ Bitaxe Mining Report ({hours} hours)**\n{report}",
+                files=[swarm_file, miner_file]
+            )
+
+            logger.info("Report sent successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to generate report: {e}", exc_info=e)
+            await ctx.send(f"❌ Failed to generate report: {str(e)}")
 
     async def cmd_miner(self, ctx, name: str):
-        """Handle !miner command."""
+        """Handle !miner command with detailed chart."""
         logger.info(f"!miner {name} command from {ctx.author.name}")
 
         # Check channel restrictions
@@ -384,7 +422,76 @@ class BitaxeBot(commands.Bot):
             await ctx.send(f"❌ Unknown miner: {name}\nAvailable: {', '.join(device_names)}")
             return
 
-        await ctx.send(f"🔍 Detailed stats for **{name}** coming in Phase 2!")
+        # Send status message
+        await ctx.send(f"🔍 Generating detailed stats for **{name}**...")
+
+        try:
+            # Get latest metrics for this miner
+            latest = self.db.get_latest_metric(name)
+
+            if not latest:
+                await ctx.send(f"❌ No data available for {name}")
+                return
+
+            # Generate chart (default 24h)
+            hours = 24
+            logger.info(f"Generating chart for {name} ({hours}h)")
+            chart = self.chart_generator.generate_single_miner_chart(name, hours)
+
+            # Create Discord file
+            chart_file = discord.File(io.BytesIO(chart), filename=f"{name}_{hours}h.png")
+
+            # Build stats message
+            freq = latest['frequency']
+            voltage = latest['core_voltage']
+            hashrate = latest['hashrate']
+            efficiency = latest['efficiency_jth']
+            asic_temp = latest['asic_temp']
+            vreg_temp = latest['vreg_temp']
+            power = latest['power']
+            uptime_hours = latest['uptime'] / 3600
+
+            # Calculate 1h average for comparison
+            from datetime import datetime, timedelta
+            lookback = datetime.now() - timedelta(hours=1)
+            cursor = self.db.conn.cursor()
+            cursor.execute("""
+                SELECT AVG(hashrate) as avg_hr, AVG(efficiency_jth) as avg_eff
+                FROM performance_metrics
+                WHERE device_id = ? AND timestamp >= ? AND efficiency_jth IS NOT NULL
+            """, (name, lookback))
+            row = cursor.fetchone()
+            avg_hashrate = row[0] if row and row[0] else hashrate
+            avg_efficiency = row[1] if row and row[1] else efficiency
+
+            # Format uptime
+            uptime_str = f"{int(uptime_hours//24)}d {int(uptime_hours%24)}h" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
+
+            stats_msg = f"""**🔍 Detailed Stats: {name}**
+
+**Configuration**
+⚙️ Clock: {freq} MHz @ {voltage} mV
+⏱️ Uptime: {uptime_str}
+
+**Performance**
+⛏️ Current Hashrate: {hashrate/1000:.3f} TH/s
+📊 1h Average: {avg_hashrate/1000:.3f} TH/s
+⚡ Efficiency: {efficiency:.1f} J/TH (1h avg: {avg_efficiency:.1f})
+🔌 Power: {power:.1f}W
+
+**Thermals**
+🌡️ ASIC Temp: {asic_temp:.1f}°C
+🌡️ VRM Temp: {vreg_temp:.1f}°C
+"""
+
+            # Send with chart
+            await ctx.send(content=stats_msg, file=chart_file)
+
+            logger.info(f"Miner detail sent for {name}")
+
+        except Exception as e:
+            logger.error(f"Failed to generate miner detail: {e}", exc_info=e)
+            await ctx.send(f"❌ Failed to generate miner detail: {str(e)}")
 
     async def cmd_health(self, ctx):
         """Handle !health command."""

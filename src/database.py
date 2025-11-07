@@ -348,6 +348,99 @@ class Database:
 
         return [dict(row) for row in cursor.fetchall()]
 
+    def get_bucketed_hashrate_trend(self, device_id: str, minutes: int, buckets: int) -> List[float]:
+        """Get bucketed hashrate trend for a device.
+
+        Args:
+            device_id: Device identifier
+            minutes: Lookback period in minutes
+            buckets: Number of time buckets to divide data into
+
+        Returns:
+            List of average hashrate values per bucket
+        """
+        cursor = self.conn.cursor()
+
+        # Calculate time range
+        now = datetime.now()
+        cutoff = now - timedelta(minutes=minutes)
+
+        # Get bucket averages
+        cursor.execute("""
+            WITH bucket_data AS (
+                SELECT
+                    CAST((julianday(?) - julianday(timestamp)) * 24 * 60 / ? AS INTEGER) as bucket,
+                    hashrate
+                FROM performance_metrics
+                WHERE device_id = ?
+                  AND timestamp >= ?
+                  AND hashrate IS NOT NULL
+            )
+            SELECT
+                bucket,
+                AVG(hashrate) as avg_hashrate
+            FROM bucket_data
+            WHERE bucket >= 0 AND bucket < ?
+            GROUP BY bucket
+            ORDER BY bucket DESC
+        """, (now, minutes / buckets, device_id, cutoff, buckets))
+
+        # Create full bucket list (fill missing buckets with None)
+        results = {row[0]: row[1] for row in cursor.fetchall()}
+        return [results.get(i) for i in range(buckets - 1, -1, -1)]
+
+    def get_bucketed_temp_trend(self, device_id: str, minutes: int, buckets: int) -> List[Optional[float]]:
+        """Get bucketed temperature trend for a device.
+
+        Args:
+            device_id: Device identifier
+            minutes: Lookback period in minutes
+            buckets: Number of time buckets to divide data into
+
+        Returns:
+            List of average ASIC temperature values per bucket
+        """
+        cursor = self.conn.cursor()
+
+        # Calculate time range
+        cutoff = datetime.now() - timedelta(minutes=minutes)
+
+        # Get bucket averages (filter out sensor errors < 0)
+        now = datetime.now()
+        cursor.execute("""
+            WITH bucket_data AS (
+                SELECT
+                    CAST((julianday(?) - julianday(timestamp)) * 24 * 60 / ? AS INTEGER) as bucket,
+                    asic_temp
+                FROM performance_metrics
+                WHERE device_id = ?
+                  AND timestamp >= ?
+                  AND asic_temp IS NOT NULL
+                  AND asic_temp > 0
+            )
+            SELECT
+                bucket,
+                AVG(asic_temp) as avg_temp
+            FROM bucket_data
+            WHERE bucket >= 0 AND bucket < ?
+            GROUP BY bucket
+            ORDER BY bucket DESC
+        """, (now, minutes / buckets, device_id, cutoff, buckets))
+
+        # Create full bucket list (fill missing buckets with None)
+        results = {row[0]: row[1] for row in cursor.fetchall()}
+        return [results.get(i) for i in range(buckets - 1, -1, -1)]
+
+    def get_all_device_ids(self) -> List[str]:
+        """Get list of all device IDs.
+
+        Returns:
+            List of device identifier strings
+        """
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT id FROM devices ORDER BY added_at")
+        return [row[0] for row in cursor.fetchall()]
+
     def close(self):
         """Close database connection."""
         if self.conn:
