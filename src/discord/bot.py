@@ -69,7 +69,7 @@ class BitaxeBot(commands.Bot):
         @self.command(name='stats')
         # @commands.cooldown(1, self.config.commands.status_cooldown, commands.BucketType.user)  # Disabled for testing
         async def stats_command(ctx):
-            """Show 1h averaged stats of all miners."""
+            """Show detailed statistics from stats.py."""
             await self.cmd_stats(ctx)
 
         @self.command(name='report')
@@ -434,15 +434,105 @@ class BitaxeBot(commands.Bot):
         await ctx.send(report)
 
     async def cmd_stats(self, ctx):
-        """Handle !stats command."""
+        """Handle !stats command - run stats.py stats and render as image."""
         logger.info(f"!stats command from {ctx.author.name}")
 
         # Check channel restrictions
         if self.config.allowed_channels and ctx.channel.id not in self.config.allowed_channels:
             return
 
-        report = self.generate_status_report()
-        await ctx.send(report)
+        await ctx.send("📊 Generating detailed statistics report...")
+
+        try:
+            # Run stats.py stats command
+            import subprocess
+            result = subprocess.run(
+                ['python', 'stats.py', 'stats'],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                await ctx.send(f"❌ Failed to generate stats: {result.stderr[:500]}")
+                return
+
+            stats_output = result.stdout
+
+            # Convert text to image for mobile-friendly viewing
+            stats_image = self._text_to_image(stats_output)
+
+            # Send as image
+            file = discord.File(io.BytesIO(stats_image), filename='bitaxe_stats.png')
+            await ctx.send(
+                content="📊 **Detailed Statistics Report**",
+                file=file
+            )
+
+            logger.info("Stats sent successfully")
+
+        except subprocess.TimeoutExpired:
+            await ctx.send("❌ Stats generation timed out")
+        except Exception as e:
+            logger.error(f"Failed to generate stats: {e}", exc_info=e)
+            await ctx.send(f"❌ Failed to generate stats: {str(e)}")
+
+    def _text_to_image(self, text: str) -> bytes:
+        """Convert text to PNG image for mobile-friendly viewing.
+
+        Args:
+            text: Text content to render
+
+        Returns:
+            PNG image as bytes
+        """
+        import matplotlib.pyplot as plt
+        import re
+
+        # Remove emojis (they don't render well in monospace)
+        # Replace common emojis with text equivalents
+        text = text.replace('📊', '[Stats]')
+        text = text.replace('🏆', '[Best]')
+        # Remove any remaining emojis
+        text = re.sub(r'[^\x00-\x7F]+', '', text)
+
+        # Use monospace font for alignment
+        plt.rcParams['font.family'] = 'monospace'
+        plt.rcParams['font.size'] = 9
+
+        # Calculate figure size based on text
+        lines = text.split('\n')
+        max_line_length = max(len(line) for line in lines) if lines else 80
+        num_lines = len(lines)
+
+        # Size: ~0.1 inch per character width, 0.15 inch per line height
+        fig_width = min(20, max(12, max_line_length * 0.08))
+        fig_height = min(30, max(8, num_lines * 0.15))
+
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        fig.patch.set_facecolor('#2B2D31')  # Discord dark background
+        ax.set_facecolor('#2B2D31')
+        ax.axis('off')
+
+        # Render text
+        ax.text(0.02, 0.98, text,
+               transform=ax.transAxes,
+               fontfamily='monospace',
+               fontsize=9,
+               color='#DCDDDE',  # Discord text color
+               verticalalignment='top',
+               horizontalalignment='left')
+
+        # Save to bytes
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight',
+                   facecolor='#2B2D31', edgecolor='none')
+        buf.seek(0)
+        image_bytes = buf.read()
+        buf.close()
+        plt.close(fig)
+
+        return image_bytes
 
     async def cmd_report(self, ctx, timespan: str):
         """Handle !report command with charts."""
@@ -646,24 +736,26 @@ class BitaxeBot(commands.Bot):
 ⛏️ **Bitaxe Monitor Bot Commands**
 
 **Status & Reports**
-`{prefix}status` - Instant snapshot (current values)
-`{prefix}stats` - Averaged stats (1h averages) ⭐
-`{prefix}report [hours|days]` - Detailed report with charts (default: 24h)
-`{prefix}miner <name>` - Detailed stats for one miner
+`{prefix}status` - Instant snapshot (current values, noisy)
+`{prefix}stats` - Detailed configuration statistics ⭐
+`{prefix}report [hours|days]` - Performance report with charts (default: 24h)
+`{prefix}miner <name>` - Individual miner deep-dive with chart
 `{prefix}health` - Check for warnings and issues
 
 **Examples**
-`{prefix}status` - Quick check (noisy, instant)
-`{prefix}stats` - Reliable stats (1h avg)
-`{prefix}report` - 24-hour report (default)
+`{prefix}status` - Quick check (instant values)
+`{prefix}stats` - All clock configs tested, efficiency rankings
+`{prefix}report` - 24-hour report with charts (default)
+`{prefix}report 1` - 1-hour report (like old !stats)
 `{prefix}report 12` - 12-hour report
 `{prefix}report 7d` - 7-day report
 `{prefix}report 14d` - 14-day report (max)
-`{prefix}miner bitaxe-1` - Individual deep-dive
+`{prefix}miner bitaxe-1` - Individual miner performance
 
 **Info**
 Charts use 15-min and 1h moving averages for clean visualization
-Auto-reports use `{prefix}stats` (1h avg) every hour to #{self.config.auto_report.channel_name}
+Hourly auto-reports post 12h charts to #{self.config.auto_report.channel_name}
+Weekly reports post 7d charts every Monday
 Monitoring {len(self.devices)} devices
         """.strip()
 
