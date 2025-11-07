@@ -385,7 +385,8 @@ class BitaxeDashboard:
     def get_total_uptime(self, device_id: str) -> Optional[Dict[str, float]]:
         """Calculate total cumulative uptime vs current session uptime.
 
-        Detects restarts by finding where uptime decreases between consecutive polls.
+        Detects restarts by finding where uptime decreases significantly between consecutive polls.
+        Ignores small decreases (< 5 minutes) which are likely clock adjustments, not real reboots.
 
         Args:
             device_id: Device identifier
@@ -410,14 +411,19 @@ class BitaxeDashboard:
         # Current session uptime (latest value)
         current_uptime = rows[-1][0]
 
-        # Calculate total uptime by detecting restarts
+        # Calculate total uptime by detecting real restarts
+        # A real restart resets uptime to near-zero (< 1 hour)
+        # Uptime decreases to larger values are clock adjustments from NTP/DST, not reboots
+        MAX_RESTART_UPTIME = 3600  # 1 hour in seconds - real restarts reset to < this
+
         total_uptime = 0
         prev_uptime = 0
         session_start_idx = 0
 
         for i, (uptime, timestamp) in enumerate(rows):
-            # Detect restart: uptime decreased
-            if uptime < prev_uptime:
+            # Detect restart: uptime decreased AND new uptime is small (< 1 hour)
+            # This filters out clock adjustments while catching real reboots
+            if uptime < prev_uptime and uptime < MAX_RESTART_UPTIME:
                 # Add the maximum uptime from the previous session
                 session_uptimes = [rows[j][0] for j in range(session_start_idx, i)]
                 if session_uptimes:
