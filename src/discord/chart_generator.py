@@ -223,17 +223,33 @@ class ChartGenerator:
         # Formatting
         ax.set_xlabel('Time')
         ax.set_ylabel('Hashrate (GH/s)')
-        ax.set_title(f'Swarm Total Hashrate ({hours}h)', fontweight='bold', pad=20)
+
+        # Format title based on timespan
+        if hours >= 24 and hours % 24 == 0:
+            title = f'Swarm Total Hashrate ({hours//24}d)'
+        else:
+            title = f'Swarm Total Hashrate ({hours}h)'
+        ax.set_title(title, fontweight='bold', pad=20)
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper left', framealpha=0.8)
 
-        # Format x-axis
+        # Format x-axis based on timespan
         if hours <= 12:
+            # Short: Show time only
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
             ax.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-        else:
+        elif hours <= 48:
+            # 1-2 days: Show day and time
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
             ax.xaxis.set_major_locator(mdates.HourLocator(interval=6))
+        elif hours <= 168:
+            # 3-7 days: Show day only
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        else:
+            # 8+ days: Show day with more spacing
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax.xaxis.set_major_locator(mdates.DayLocator(interval=2))
         plt.xticks(rotation=45, ha='right')
 
         # Add stats text
@@ -325,7 +341,13 @@ class ChartGenerator:
         ax1.set_xlabel('Time')
         ax1.set_ylabel('Hashrate (GH/s)', color='#FFFFFF')
         ax2.set_ylabel('Temperature (°C)', color='#FF6B6B')
-        ax1.set_title(f'Individual Miner Performance ({hours}h)', fontweight='bold', pad=20)
+
+        # Format title based on timespan
+        if hours >= 24 and hours % 24 == 0:
+            title = f'Individual Miner Performance ({hours//24}d)'
+        else:
+            title = f'Individual Miner Performance ({hours}h)'
+        ax1.set_title(title, fontweight='bold', pad=20)
 
         # Grid on primary axis only
         ax1.grid(True, alpha=0.3)
@@ -340,13 +362,23 @@ class ChartGenerator:
                     transform=ax2.transAxes, fontsize=9, va='bottom', ha='right',
                     color='#FF6B6B', bbox=dict(boxstyle='round', facecolor='black', alpha=0.5))
 
-        # Format x-axis
+        # Format x-axis based on timespan
         if hours <= 12:
+            # Short: Show time only
             ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
             ax1.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-        else:
+        elif hours <= 48:
+            # 1-2 days: Show day and time
             ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
             ax1.xaxis.set_major_locator(mdates.HourLocator(interval=6))
+        elif hours <= 168:
+            # 3-7 days: Show day only
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        else:
+            # 8+ days: Show day with more spacing
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax1.xaxis.set_major_locator(mdates.DayLocator(interval=2))
         plt.xticks(rotation=45, ha='right')
 
         # Color the y-axis labels
@@ -426,7 +458,13 @@ class ChartGenerator:
         ax1.set_xlabel('Time')
         ax1.set_ylabel('Hashrate (GH/s)', color='#00FFFF')
         ax2.set_ylabel('Temperature (°C)', color='#FF6B6B')
-        ax1.set_title(f'{device_id} Performance ({hours}h)', fontweight='bold', pad=20)
+
+        # Format title based on timespan
+        if hours >= 24 and hours % 24 == 0:
+            title = f'{device_id} Performance ({hours//24}d)'
+        else:
+            title = f'{device_id} Performance ({hours}h)'
+        ax1.set_title(title, fontweight='bold', pad=20)
 
         ax1.grid(True, alpha=0.3)
 
@@ -435,13 +473,23 @@ class ChartGenerator:
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left', framealpha=0.8)
 
-        # Format x-axis
+        # Format x-axis based on timespan
         if hours <= 12:
+            # Short: Show time only
             ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
             ax1.xaxis.set_major_locator(mdates.HourLocator(interval=2))
-        else:
+        elif hours <= 48:
+            # 1-2 days: Show day and time
             ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
             ax1.xaxis.set_major_locator(mdates.HourLocator(interval=6))
+        elif hours <= 168:
+            # 3-7 days: Show day only
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax1.xaxis.set_major_locator(mdates.DayLocator(interval=1))
+        else:
+            # 8+ days: Show day with more spacing
+            ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
+            ax1.xaxis.set_major_locator(mdates.DayLocator(interval=2))
         plt.xticks(rotation=45, ha='right')
 
         # Color y-axis labels

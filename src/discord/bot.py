@@ -74,13 +74,13 @@ class BitaxeBot(commands.Bot):
 
         @self.command(name='report')
         # @commands.cooldown(1, self.config.commands.report_cooldown, commands.BucketType.user)  # Disabled for testing
-        async def report_command(ctx, hours: int = 24):
+        async def report_command(ctx, timespan: str = "24"):
             """Generate detailed performance report.
 
-            Usage: !report [hours]
-            Example: !report 12
+            Usage: !report [hours|days]
+            Examples: !report 12, !report 7d, !report 168
             """
-            await self.cmd_report(ctx, hours)
+            await self.cmd_report(ctx, timespan)
 
         @self.command(name='miner')
         # @commands.cooldown(1, self.config.commands.miner_cooldown, commands.BucketType.user)  # Disabled for testing
@@ -117,6 +117,17 @@ class BitaxeBot(commands.Bot):
                 logger.info(f"Auto-report channel: #{self.config.auto_report.channel_name} ({self.config.auto_report.channel_id})")
             except ValueError as e:
                 logger.error(f"Auto-report configuration error: {e}")
+
+        # Start weekly reporting if enabled
+        if self.config.weekly_report.enabled:
+            try:
+                if not self.config.weekly_report.channel_id:
+                    raise ValueError("weekly_report.channel_id is required")
+                self.schedule_weekly_report()
+                logger.info(f"Weekly report scheduled: {self.config.weekly_report.schedule}")
+                logger.info(f"Weekly report channel: #{self.config.weekly_report.channel_name} ({self.config.weekly_report.channel_id})")
+            except ValueError as e:
+                logger.error(f"Weekly report configuration error: {e}")
 
         logger.info(f"Bot ready! Monitoring {len(self.devices)} devices")
 
@@ -165,13 +176,84 @@ class BitaxeBot(commands.Bot):
 
             logger.info(f"Sending auto-report to #{self.config.auto_report.channel_name}")
 
-            # Generate report (will add charts in Phase 2)
+            # Generate report (with charts if enabled)
             report = self.generate_status_report()
-            await channel.send(report)
+
+            if self.config.auto_report.include_charts:
+                # Generate charts
+                hours = self.config.auto_report.graph_lookback_hours
+                device_ids = [d['name'] for d in self.devices]
+
+                swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
+                miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
+
+                swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
+                miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
+
+                await channel.send(content=f"**⛏️ Hourly Report ({hours}h)**\n{report}", files=[swarm_file, miner_file])
+            else:
+                await channel.send(report)
 
             logger.info("Auto-report sent successfully")
         except Exception as e:
             logger.error(f"Failed to send auto-report: {e}", exc_info=e)
+
+    def schedule_weekly_report(self):
+        """Schedule weekly report using cron syntax (UTC)."""
+        parts = self.config.weekly_report.schedule.split()
+        if len(parts) != 5:
+            raise ValueError(f"Invalid cron schedule: {self.config.weekly_report.schedule}")
+
+        trigger = CronTrigger(
+            minute=parts[0],
+            hour=parts[1],
+            day=parts[2],
+            month=parts[3],
+            day_of_week=parts[4]
+        )
+
+        self.scheduler.add_job(
+            self.send_weekly_report,
+            trigger=trigger,
+            id='weekly_report',
+            name='Weekly Report'
+        )
+
+    async def send_weekly_report(self):
+        """Send scheduled weekly report to configured channel."""
+        try:
+            channel = self.get_channel(self.config.weekly_report.channel_id)
+            if not channel:
+                logger.error(f"Weekly report channel not found: {self.config.weekly_report.channel_id}")
+                return
+
+            logger.info(f"Sending weekly report to #{self.config.weekly_report.channel_name}")
+
+            # Generate 7-day report
+            hours = self.config.weekly_report.graph_lookback_hours
+            device_ids = [d['name'] for d in self.devices]
+
+            # Generate text report
+            report = self.generate_status_report()
+
+            if self.config.weekly_report.include_charts:
+                # Generate charts
+                swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
+                miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
+
+                swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_7d.png")
+                miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_7d.png")
+
+                await channel.send(
+                    content=f"**⛏️ Weekly Report (7 days)**\n{report}",
+                    files=[swarm_file, miner_file]
+                )
+            else:
+                await channel.send(f"**⛏️ Weekly Report (7 days)**\n{report}")
+
+            logger.info("Weekly report sent successfully")
+        except Exception as e:
+            logger.error(f"Failed to send weekly report: {e}", exc_info=e)
 
     def get_swarm_1h_average(self) -> tuple[float, float]:
         """Calculate 1-hour average hashrate and power for entire swarm.
@@ -362,21 +444,41 @@ class BitaxeBot(commands.Bot):
         report = self.generate_status_report()
         await ctx.send(report)
 
-    async def cmd_report(self, ctx, hours: int):
+    async def cmd_report(self, ctx, timespan: str):
         """Handle !report command with charts."""
-        logger.info(f"!report {hours} command from {ctx.author.name}")
+        logger.info(f"!report {timespan} command from {ctx.author.name}")
 
         # Check channel restrictions
         if self.config.allowed_channels and ctx.channel.id not in self.config.allowed_channels:
             return
 
+        # Parse timespan (support "7d" for days, or plain hours)
+        try:
+            if timespan.lower().endswith('d'):
+                # Days format: "7d" = 7 * 24 hours
+                days = int(timespan[:-1])
+                hours = days * 24
+                timespan_label = f"{days}d"
+            else:
+                # Plain hours: "168"
+                hours = int(timespan)
+                # Show as days if >= 24h and divisible by 24
+                if hours >= 24 and hours % 24 == 0:
+                    timespan_label = f"{hours//24}d"
+                else:
+                    timespan_label = f"{hours}h"
+        except ValueError:
+            await ctx.send(f"❌ Invalid timespan: {timespan}. Use hours (e.g., 24) or days (e.g., 7d)")
+            return
+
         # Validate hours
         if hours < 1 or hours > self.config.commands.report_max_hours:
-            await ctx.send(f"❌ Hours must be between 1 and {self.config.commands.report_max_hours}")
+            max_days = self.config.commands.report_max_hours // 24
+            await ctx.send(f"❌ Timespan must be between 1h and {max_days}d ({self.config.commands.report_max_hours}h)")
             return
 
         # Send status message first
-        await ctx.send(f"📊 Generating {hours}h performance report with charts...")
+        await ctx.send(f"📊 Generating {timespan_label} performance report with charts...")
 
         try:
             # Get device IDs
@@ -398,7 +500,7 @@ class BitaxeBot(commands.Bot):
 
             # Send with attachments
             await ctx.send(
-                content=f"**⛏️ Bitaxe Mining Report ({hours} hours)**\n{report}",
+                content=f"**⛏️ Bitaxe Mining Report ({timespan_label})**\n{report}",
                 files=[swarm_file, miner_file]
             )
 
@@ -546,17 +648,21 @@ class BitaxeBot(commands.Bot):
 **Status & Reports**
 `{prefix}status` - Instant snapshot (current values)
 `{prefix}stats` - Averaged stats (1h averages) ⭐
-`{prefix}report [hours]` - Detailed report with charts (default: 24h)
+`{prefix}report [hours|days]` - Detailed report with charts (default: 24h)
 `{prefix}miner <name>` - Detailed stats for one miner
 `{prefix}health` - Check for warnings and issues
 
 **Examples**
 `{prefix}status` - Quick check (noisy, instant)
 `{prefix}stats` - Reliable stats (1h avg)
-`{prefix}report 12` - 12-hour report with charts
+`{prefix}report` - 24-hour report (default)
+`{prefix}report 12` - 12-hour report
+`{prefix}report 7d` - 7-day report
+`{prefix}report 14d` - 14-day report (max)
 `{prefix}miner bitaxe-1` - Individual deep-dive
 
 **Info**
+Charts use 15-min and 1h moving averages for clean visualization
 Auto-reports use `{prefix}stats` (1h avg) every hour to #{self.config.auto_report.channel_name}
 Monitoring {len(self.devices)} devices
         """.strip()

@@ -13,9 +13,16 @@ class AutoReportConfig(BaseModel):
     schedule: str = "0 * * * *"  # Cron format
     include_charts: bool = True
     graph_lookback_hours: int = 12
-    show_moving_averages: bool = True
-    show_1h_average: bool = True
-    show_24h_average: bool = True
+
+
+class WeeklyReportConfig(BaseModel):
+    """Weekly report configuration."""
+    enabled: bool = False
+    channel_name: str = "swarm"
+    channel_id: Optional[int] = None
+    schedule: str = "0 12 * * 1"  # Monday 12:00 UTC (7am EST)
+    include_charts: bool = True
+    graph_lookback_hours: int = 168  # 7 days
 
 
 class ChartConfig(BaseModel):
@@ -30,7 +37,7 @@ class CommandConfig(BaseModel):
     """Command-specific configuration."""
     status_cooldown: int = 10
     report_cooldown: int = 60
-    report_max_hours: int = 168
+    report_max_hours: int = 336  # 14 days
     miner_cooldown: int = 30
 
 
@@ -41,6 +48,7 @@ class DiscordConfig(BaseModel):
     command_prefix: str = "!"
     allowed_channels: List[int] = Field(default_factory=list)
     auto_report: AutoReportConfig = Field(default_factory=AutoReportConfig)
+    weekly_report: WeeklyReportConfig = Field(default_factory=WeeklyReportConfig)
     charts: ChartConfig = Field(default_factory=ChartConfig)
     commands: CommandConfig = Field(default_factory=CommandConfig)
 
