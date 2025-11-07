@@ -84,13 +84,13 @@ class BitaxeBot(commands.Bot):
 
         @self.command(name='miner')
         # @commands.cooldown(1, self.config.commands.miner_cooldown, commands.BucketType.user)  # Disabled for testing
-        async def miner_command(ctx, name: str):
+        async def miner_command(ctx, name: str, timespan: str = "24"):
             """Show detailed stats for a specific miner.
 
-            Usage: !miner <name>
-            Example: !miner bitaxe-1
+            Usage: !miner <name> [hours|days]
+            Examples: !miner bitaxe-1, !miner bitaxe-1 12, !miner bitaxe-1 7d
             """
-            await self.cmd_miner(ctx, name)
+            await self.cmd_miner(ctx, name, timespan)
 
         @self.command(name='health')
         async def health_command(ctx):
@@ -600,9 +600,9 @@ class BitaxeBot(commands.Bot):
             logger.error(f"Failed to generate report: {e}", exc_info=e)
             await ctx.send(f"❌ Failed to generate report: {str(e)}")
 
-    async def cmd_miner(self, ctx, name: str):
+    async def cmd_miner(self, ctx, name: str, timespan: str):
         """Handle !miner command with detailed chart."""
-        logger.info(f"!miner {name} command from {ctx.author.name}")
+        logger.info(f"!miner {name} {timespan} command from {ctx.author.name}")
 
         # Check channel restrictions
         if self.config.allowed_channels and ctx.channel.id not in self.config.allowed_channels:
@@ -614,8 +614,33 @@ class BitaxeBot(commands.Bot):
             await ctx.send(f"❌ Unknown miner: {name}\nAvailable: {', '.join(device_names)}")
             return
 
+        # Parse timespan (support "7d" for days, or plain hours)
+        try:
+            if timespan.lower().endswith('d'):
+                # Days format: "7d" = 7 * 24 hours
+                days = int(timespan[:-1])
+                hours = days * 24
+                timespan_label = f"{days}d"
+            else:
+                # Plain hours: "24"
+                hours = int(timespan)
+                # Show as days if >= 24h and divisible by 24
+                if hours >= 24 and hours % 24 == 0:
+                    timespan_label = f"{hours//24}d"
+                else:
+                    timespan_label = f"{hours}h"
+        except ValueError:
+            await ctx.send(f"❌ Invalid timespan: {timespan}. Use hours (e.g., 24) or days (e.g., 7d)")
+            return
+
+        # Validate hours
+        if hours < 1 or hours > self.config.commands.report_max_hours:
+            max_days = self.config.commands.report_max_hours // 24
+            await ctx.send(f"❌ Timespan must be between 1h and {max_days}d ({self.config.commands.report_max_hours}h)")
+            return
+
         # Send status message
-        await ctx.send(f"🔍 Generating detailed stats for **{name}**...")
+        await ctx.send(f"🔍 Generating {timespan_label} stats for **{name}**...")
 
         try:
             # Get latest metrics for this miner
@@ -625,8 +650,7 @@ class BitaxeBot(commands.Bot):
                 await ctx.send(f"❌ No data available for {name}")
                 return
 
-            # Generate chart (default 24h)
-            hours = 24
+            # Generate chart with custom timeframe
             logger.info(f"Generating chart for {name} ({hours}h)")
             chart = self.chart_generator.generate_single_miner_chart(name, hours)
 
@@ -659,7 +683,7 @@ class BitaxeBot(commands.Bot):
             # Format uptime
             uptime_str = f"{int(uptime_hours//24)}d {int(uptime_hours%24)}h" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
 
-            stats_msg = f"""**🔍 Detailed Stats: {name}**
+            stats_msg = f"""**🔍 Detailed Stats: {name} ({timespan_label})**
 
 **Configuration**
 ⚙️ Clock: {freq} MHz @ {voltage} mV
@@ -674,6 +698,8 @@ class BitaxeBot(commands.Bot):
 **Thermals**
 🌡️ ASIC Temp: {asic_temp:.1f}°C
 🌡️ VRM Temp: {vreg_temp:.1f}°C
+
+*Chart shows {timespan_label} history with adaptive moving averages*
 """
 
             # Send with chart
@@ -739,21 +765,22 @@ class BitaxeBot(commands.Bot):
 `{prefix}status` - Instant snapshot (current values, noisy)
 `{prefix}stats` - Detailed configuration statistics ⭐
 `{prefix}report [hours|days]` - Performance report with charts (default: 24h)
-`{prefix}miner <name>` - Individual miner deep-dive with chart
+`{prefix}miner <name> [hours|days]` - Individual miner deep-dive (default: 24h)
 `{prefix}health` - Check for warnings and issues
 
 **Examples**
 `{prefix}status` - Quick check (instant values)
 `{prefix}stats` - All clock configs tested, efficiency rankings
 `{prefix}report` - 24-hour report with charts (default)
-`{prefix}report 1` - 1-hour report (like old !stats)
+`{prefix}report 1` - 1-hour report (high granularity)
 `{prefix}report 12` - 12-hour report
 `{prefix}report 7d` - 7-day report
-`{prefix}report 14d` - 14-day report (max)
-`{prefix}miner bitaxe-1` - Individual miner performance
+`{prefix}miner bitaxe-1` - Individual miner, 24h (default)
+`{prefix}miner bitaxe-1 1` - Individual miner, 1h (detailed)
+`{prefix}miner bitaxe-1 7d` - Individual miner, 7d (trends)
 
 **Info**
-Charts use 15-min and 1h moving averages for clean visualization
+Charts use adaptive MAs (≤4h: 5min/15min, >4h: 15min/1h) with 20% y-axis padding
 Hourly auto-reports post 12h charts to #{self.config.auto_report.channel_name}
 Weekly reports post 7d charts every Monday
 Monitoring {len(self.devices)} devices

@@ -176,7 +176,10 @@ class ChartGenerator:
 
         # Get data for all devices
         minutes = hours * 60
-        buckets = min(144, minutes // 5)  # 5-minute buckets, max 144 points
+
+        # Use 5-minute buckets consistently for cleaner data
+        bucket_minutes = 5
+        buckets = min(144, minutes // 5)
 
         # Sum hashrates across all devices
         all_trends = []
@@ -200,24 +203,35 @@ class ChartGenerator:
         now = datetime.now()
         timestamps = [now - timedelta(minutes=minutes * (buckets - i - 1) / buckets) for i in range(buckets)]
 
-        # Calculate moving averages
-        ma_15m = self._calculate_moving_average(swarm_trend, window=3)  # 3 * 5min = 15min
-        ma_1h = self._calculate_moving_average(swarm_trend, window=12)  # 12 * 5min = 1h
+        # Calculate adaptive moving averages based on timeframe
+        # Use relaxed smoothing for small timeframes to avoid noise
+        if hours <= 4:
+            # ≤4h: 5-min buckets, use 5-min and 15-min MAs (relaxed)
+            ma_short = self._calculate_moving_average(swarm_trend, window=1)  # 1 * 5min = 5min
+            ma_long = self._calculate_moving_average(swarm_trend, window=3)  # 3 * 5min = 15min
+            ma_short_label = '5-min MA'
+            ma_long_label = '15-min MA'
+        else:
+            # >4h: 5-min buckets, use 15-min and 1h MAs
+            ma_short = self._calculate_moving_average(swarm_trend, window=3)  # 3 * 5min = 15min
+            ma_long = self._calculate_moving_average(swarm_trend, window=12)  # 12 * 5min = 1h
+            ma_short_label = '15-min MA'
+            ma_long_label = '1h MA'
 
         # Create figure
         fig, ax = plt.subplots(figsize=self.figsize)
 
-        # Plot lines (15m and 1h only, no raw data)
-        ax.plot(timestamps, ma_15m, '-', color='#00FFFF', linewidth=2.5,
-                label='15-min Moving Average', alpha=0.9, marker='o', markersize=2)
-        ax.plot(timestamps, ma_1h, '-', color='#FFD700', linewidth=3,
-                label='1h Moving Average', alpha=0.95)
+        # Plot adaptive moving average lines
+        ax.plot(timestamps, ma_short, '-', color='#00FFFF', linewidth=2.5,
+                label=ma_short_label, alpha=0.9, marker='o', markersize=2)
+        ax.plot(timestamps, ma_long, '-', color='#FFD700', linewidth=3,
+                label=ma_long_label, alpha=0.95)
 
-        # Fill under 1h MA curve
-        valid_indices = [i for i, v in enumerate(ma_1h) if v is not None]
+        # Fill under long MA curve
+        valid_indices = [i for i, v in enumerate(ma_long) if v is not None]
         if valid_indices:
             ax.fill_between([timestamps[i] for i in valid_indices],
-                           [ma_1h[i] for i in valid_indices],
+                           [ma_long[i] for i in valid_indices],
                            alpha=0.15, color='#FFD700')
 
         # Formatting
@@ -232,6 +246,16 @@ class ChartGenerator:
         ax.set_title(title, fontweight='bold', pad=20)
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper left', framealpha=0.8)
+
+        # Add padding to y-axis to reduce dramatic appearance of variance
+        valid_data = [v for v in swarm_trend if v is not None]
+        if valid_data:
+            data_min = min(valid_data)
+            data_max = max(valid_data)
+            data_range = data_max - data_min
+            # Add 20% padding above and below
+            padding = data_range * 0.2
+            ax.set_ylim(max(0, data_min - padding), data_max + padding)
 
         # Format x-axis based on timespan
         if hours <= 12:
@@ -253,15 +277,15 @@ class ChartGenerator:
         plt.xticks(rotation=45, ha='right')
 
         # Add stats text
-        valid_15m = [v for v in ma_15m if v is not None]
-        valid_1h = [v for v in ma_1h if v is not None]
-        if valid_15m and valid_1h:
-            current_15m = ma_15m[-1] if ma_15m[-1] is not None else 0
-            current_1h = ma_1h[-1] if ma_1h[-1] is not None else 0
-            avg_period = np.mean(valid_1h)
-            variance = (np.std(valid_1h) / avg_period * 100) if avg_period > 0 else 0
+        valid_short = [v for v in ma_short if v is not None]
+        valid_long = [v for v in ma_long if v is not None]
+        if valid_short and valid_long:
+            current_short = ma_short[-1] if ma_short[-1] is not None else 0
+            current_long = ma_long[-1] if ma_long[-1] is not None else 0
+            avg_period = np.mean(valid_long)
+            variance = (np.std(valid_long) / avg_period * 100) if avg_period > 0 else 0
 
-            stats_text = f"15m: {current_15m:.1f} GH/s | 1h: {current_1h:.1f} GH/s | {hours}h Avg: {avg_period:.1f} GH/s | Variance: ±{variance:.1f}%"
+            stats_text = f"{ma_short_label}: {current_short:.1f} GH/s | {ma_long_label}: {current_long:.1f} GH/s | {hours}h Avg: {avg_period:.1f} GH/s | Variance: ±{variance:.1f}%"
             ax.text(0.5, 0.98, stats_text, transform=ax.transAxes,
                    fontsize=10, va='top', ha='center',
                    bbox=dict(boxstyle='round', facecolor='black', alpha=0.7))
@@ -296,7 +320,18 @@ class ChartGenerator:
 
         # Get data
         minutes = hours * 60
-        buckets = min(144, minutes // 5)  # 5-minute buckets
+
+        # Use 5-minute buckets consistently, adjust MA smoothing
+        bucket_minutes = 5
+        buckets = min(144, minutes // 5)
+
+        # Use relaxed smoothing for small timeframes
+        if hours <= 4:
+            ma_window = 1  # 5-min MA (raw, less smoothing)
+            ma_label = '5-min MA'
+        else:
+            ma_window = 3  # 15-min MA
+            ma_label = '15-min MA'
 
         # Generate timestamps
         now = datetime.now()
@@ -306,8 +341,9 @@ class ChartGenerator:
         fig, ax1 = plt.subplots(figsize=self.figsize)
         ax2 = ax1.twinx()  # Secondary axis for temperature
 
-        # Collect all temp data to set proper y-axis limits
+        # Collect all temp and hashrate data to set proper y-axis limits
         all_temps = []
+        all_hashrates = []
 
         # Plot hashrate for each miner
         for idx, device_id in enumerate(device_ids):
@@ -316,8 +352,12 @@ class ChartGenerator:
             # Get hashrate trend
             hashrate_trend = self.db.get_bucketed_hashrate_trend(device_id, minutes, buckets)
 
-            # Smooth hashrate with 15-min moving average
-            hashrate_ma = self._calculate_moving_average(hashrate_trend, window=3)
+            # Smooth hashrate with adaptive moving average
+            hashrate_ma = self._calculate_moving_average(hashrate_trend, window=ma_window)
+
+            # Collect valid hashrates for axis scaling
+            valid_hr = [h for h in hashrate_ma if h is not None]
+            all_hashrates.extend(valid_hr)
 
             # Plot smoothed hashrate line
             ax1.plot(timestamps, hashrate_ma, '-', color=color, linewidth=2.5,
@@ -326,8 +366,8 @@ class ChartGenerator:
             # Get temperature trend
             temp_trend = self.db.get_bucketed_temp_trend(device_id, minutes, buckets)
 
-            # Smooth temperature with 15-min moving average
-            temp_ma = self._calculate_moving_average(temp_trend, window=3)
+            # Smooth temperature with adaptive moving average
+            temp_ma = self._calculate_moving_average(temp_trend, window=ma_window)
 
             # Collect valid temps for axis scaling
             valid_temps = [t for t in temp_ma if t is not None]
@@ -353,12 +393,12 @@ class ChartGenerator:
         ax1.grid(True, alpha=0.3)
 
         # Legends
-        ax1.legend(loc='upper left', framealpha=0.8, title='Hashrate (15m MA, solid lines)')
+        ax1.legend(loc='upper left', framealpha=0.8, title=f'Hashrate ({ma_label}, solid lines)')
 
         # Add note about temperature lines
         if all_temps:
             temp_avg = sum(all_temps) / len(all_temps)
-            ax2.text(0.98, 0.02, f'Temp (15m MA, dashed)\nAvg: {temp_avg:.1f}°C',
+            ax2.text(0.98, 0.02, f'Temp ({ma_label}, dashed)\nAvg: {temp_avg:.1f}°C',
                     transform=ax2.transAxes, fontsize=9, va='bottom', ha='right',
                     color='#FF6B6B', bbox=dict(boxstyle='round', facecolor='black', alpha=0.5))
 
@@ -385,14 +425,24 @@ class ChartGenerator:
         ax1.tick_params(axis='y', labelcolor='#FFFFFF')
         ax2.tick_params(axis='y', labelcolor='#FF6B6B')
 
-        # Set y-axis limits dynamically based on actual data
+        # Add padding to hashrate y-axis to reduce dramatic appearance
+        if all_hashrates:
+            hr_min = min(all_hashrates)
+            hr_max = max(all_hashrates)
+            hr_range = hr_max - hr_min
+            # Add 20% padding
+            padding = hr_range * 0.2
+            ax1.set_ylim(max(0, hr_min - padding), hr_max + padding)
+
+        # Set temperature y-axis limits with padding
         if all_temps:
             temp_min = min(all_temps)
             temp_max = max(all_temps)
             temp_range = temp_max - temp_min
-            # Add 10% padding above and below
-            ax2.set_ylim(max(30, temp_min - temp_range * 0.1),
-                        min(90, temp_max + temp_range * 0.1))
+            # Add 20% padding above and below
+            padding = temp_range * 0.2
+            ax2.set_ylim(max(30, temp_min - padding),
+                        min(90, temp_max + padding))
         else:
             ax2.set_ylim(40, 80)  # Fallback if no data
 
@@ -426,7 +476,22 @@ class ChartGenerator:
 
         # Get data
         minutes = hours * 60
+
+        # Use 5-minute buckets consistently, adjust MA windows
+        bucket_minutes = 5
         buckets = min(144, minutes // 5)
+
+        # Use relaxed smoothing for small timeframes
+        if hours <= 4:
+            ma_short_window = 1  # 5-min MA (raw)
+            ma_long_window = 3  # 15-min MA
+            ma_short_label = '5-min MA'
+            ma_long_label = '15-min MA'
+        else:
+            ma_short_window = 3  # 15-min MA
+            ma_long_window = 12  # 1h MA
+            ma_short_label = '15-min MA'
+            ma_long_label = '1h MA'
 
         hashrate_trend = self.db.get_bucketed_hashrate_trend(device_id, minutes, buckets)
         temp_trend = self.db.get_bucketed_temp_trend(device_id, minutes, buckets)
@@ -439,20 +504,20 @@ class ChartGenerator:
         fig, ax1 = plt.subplots(figsize=self.figsize)
         ax2 = ax1.twinx()
 
-        # Calculate moving averages for hashrate
-        ma_15m = self._calculate_moving_average(hashrate_trend, window=3)  # 15 min
-        ma_1h = self._calculate_moving_average(hashrate_trend, window=12)  # 1 hour
+        # Calculate adaptive moving averages for hashrate
+        ma_short = self._calculate_moving_average(hashrate_trend, window=ma_short_window)
+        ma_long = self._calculate_moving_average(hashrate_trend, window=ma_long_window)
 
         # Plot hashrate with both MAs
-        ax1.plot(timestamps, ma_15m, '-', color='#00FFFF', linewidth=2.5,
-                label='15m Moving Avg', marker='o', markersize=2, alpha=0.9)
-        ax1.plot(timestamps, ma_1h, '-', color='#FFD700', linewidth=3,
-                label='1h Moving Avg', alpha=0.95)
+        ax1.plot(timestamps, ma_short, '-', color='#00FFFF', linewidth=2.5,
+                label=ma_short_label, marker='o', markersize=2, alpha=0.9)
+        ax1.plot(timestamps, ma_long, '-', color='#FFD700', linewidth=3,
+                label=ma_long_label, alpha=0.95)
 
         # Smooth and plot temperature
-        temp_ma = self._calculate_moving_average(temp_trend, window=3)  # 15 min
+        temp_ma = self._calculate_moving_average(temp_trend, window=ma_short_window)
         ax2.plot(timestamps, temp_ma, '-', color='#FF6B6B', linewidth=2,
-                label='ASIC Temp (15m MA)', alpha=0.7, marker='s', markersize=2)
+                label=f'ASIC Temp ({ma_short_label})', alpha=0.7, marker='s', markersize=2)
 
         # Formatting
         ax1.set_xlabel('Time')
@@ -496,19 +561,37 @@ class ChartGenerator:
         ax1.tick_params(axis='y', labelcolor='#00FFFF')
         ax2.tick_params(axis='y', labelcolor='#FF6B6B')
 
-        # Add stats
-        valid_15m = [v for v in ma_15m if v is not None]
-        valid_1h = [v for v in ma_1h if v is not None]
-        valid_temps = [v for v in temp_ma if v is not None]
+        # Add padding to y-axes to reduce dramatic appearance of variance
+        valid_short = [v for v in ma_short if v is not None]
+        valid_long = [v for v in ma_long if v is not None]
+        all_hr_values = valid_short + valid_long
 
-        if valid_15m and valid_1h:
-            current_15m = ma_15m[-1] if ma_15m[-1] is not None else 0
-            current_1h = ma_1h[-1] if ma_1h[-1] is not None else 0
-            avg_hr = np.mean(valid_1h)
+        if all_hr_values:
+            hr_min = min(all_hr_values)
+            hr_max = max(all_hr_values)
+            hr_range = hr_max - hr_min
+            # Add 20% padding
+            padding = hr_range * 0.2
+            ax1.set_ylim(max(0, hr_min - padding), hr_max + padding)
+
+        valid_temps = [v for v in temp_ma if v is not None]
+        if valid_temps:
+            temp_min = min(valid_temps)
+            temp_max = max(valid_temps)
+            temp_range = temp_max - temp_min
+            # Add 20% padding
+            padding = temp_range * 0.2
+            ax2.set_ylim(max(30, temp_min - padding), min(90, temp_max + padding))
+
+        # Add stats (reuse valid data from axis scaling)
+        if valid_short and valid_long:
+            current_short = ma_short[-1] if ma_short[-1] is not None else 0
+            current_long = ma_long[-1] if ma_long[-1] is not None else 0
+            avg_hr = np.mean(valid_long)
             current_temp = temp_ma[-1] if temp_ma[-1] is not None else 0
             avg_temp = np.mean(valid_temps) if valid_temps else 0
 
-            stats_text = (f"Hashrate: 15m={current_15m:.1f} | 1h={current_1h:.1f} | Avg={avg_hr:.1f} GH/s | "
+            stats_text = (f"Hashrate: {ma_short_label}={current_short:.1f} | {ma_long_label}={current_long:.1f} | Avg={avg_hr:.1f} GH/s | "
                          f"Temp: {current_temp:.1f}°C (avg: {avg_temp:.1f})")
             ax1.text(0.5, 0.98, stats_text, transform=ax1.transAxes,
                     fontsize=10, va='top', ha='center',
