@@ -176,13 +176,19 @@ class BitaxeBot(commands.Bot):
 
             logger.info(f"Sending auto-report to #{self.config.auto_report.channel_name}")
 
-            # Generate report (with charts if enabled)
-            report = self.generate_status_report()
+            # Get report parameters
+            hours = self.config.auto_report.graph_lookback_hours
+            device_ids = [d['name'] for d in self.devices]
+
+            # Generate report with health alerts (with charts if enabled)
+            health_alerts = self.generate_health_alerts()
+            report = self.generate_status_report(hours)
+
+            # Combine alerts and report
+            full_report = f"{health_alerts}\n{report}" if health_alerts else report
 
             if self.config.auto_report.include_charts:
                 # Generate charts
-                hours = self.config.auto_report.graph_lookback_hours
-                device_ids = [d['name'] for d in self.devices]
 
                 swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
                 miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
@@ -190,9 +196,9 @@ class BitaxeBot(commands.Bot):
                 swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
                 miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
 
-                await channel.send(content=f"**⛏️ Hourly Report ({hours}h)**\n{report}", files=[swarm_file, miner_file])
+                await channel.send(content=f"**⛏️ Hourly Report ({hours}h)**\n{full_report}", files=[swarm_file, miner_file])
             else:
-                await channel.send(report)
+                await channel.send(full_report)
 
             logger.info("Auto-report sent successfully")
         except Exception as e:
@@ -233,8 +239,12 @@ class BitaxeBot(commands.Bot):
             hours = self.config.weekly_report.graph_lookback_hours
             device_ids = [d['name'] for d in self.devices]
 
-            # Generate text report
-            report = self.generate_status_report()
+            # Generate text report with health alerts
+            health_alerts = self.generate_health_alerts()
+            report = self.generate_status_report(hours)
+
+            # Combine alerts and report
+            full_report = f"{health_alerts}\n{report}" if health_alerts else report
 
             if self.config.weekly_report.include_charts:
                 # Generate charts
@@ -245,26 +255,28 @@ class BitaxeBot(commands.Bot):
                 miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_7d.png")
 
                 await channel.send(
-                    content=f"**⛏️ Weekly Report (7 days)**\n{report}",
+                    content=f"**⛏️ Weekly Report (7 days)**\n{full_report}",
                     files=[swarm_file, miner_file]
                 )
             else:
-                await channel.send(f"**⛏️ Weekly Report (7 days)**\n{report}")
+                await channel.send(f"**⛏️ Weekly Report (7 days)**\n{full_report}")
 
             logger.info("Weekly report sent successfully")
         except Exception as e:
             logger.error(f"Failed to send weekly report: {e}", exc_info=e)
 
-    def get_swarm_1h_average(self) -> tuple[float, float]:
-        """Calculate 1-hour average hashrate and power for entire swarm.
+    def get_swarm_average(self, hours: int) -> tuple[float, float]:
+        """Calculate average hashrate and power for entire swarm over specified period.
+
+        Args:
+            hours: Lookback period in hours
 
         Returns:
             Tuple of (avg_hashrate, avg_power) or (0, 0) if no data
         """
         from datetime import datetime, timedelta
 
-        # Get 1h averages for each device
-        lookback = datetime.now() - timedelta(hours=1)
+        lookback = datetime.now() - timedelta(hours=hours)
 
         total_hashrate = 0
         total_power = 0
@@ -289,30 +301,99 @@ class BitaxeBot(commands.Bot):
 
         return (total_hashrate, total_power)
 
-    def generate_status_report(self) -> str:
+    def get_swarm_1h_average(self) -> tuple[float, float]:
+        """Calculate 1-hour average hashrate and power for entire swarm.
+
+        Returns:
+            Tuple of (avg_hashrate, avg_power) or (0, 0) if no data
+        """
+        return self.get_swarm_average(1)
+
+    def generate_health_alerts(self, reject_threshold: float = 1.0, offline_threshold_minutes: int = 10) -> str:
+        """Generate health alerts for offline miners and high reject rates.
+
+        Args:
+            reject_threshold: Reject rate percentage threshold (default 1.0%)
+            offline_threshold_minutes: Minutes without data to consider offline (default 10)
+
+        Returns:
+            Formatted alert string, empty if no issues
+        """
+        device_ids = [d['name'] for d in self.devices]
+        health_data = self.db.get_all_device_health(device_ids, offline_threshold_minutes)
+
+        offline_miners = []
+        high_reject_miners = []
+
+        for device_id, health in health_data.items():
+            if not health['is_online']:
+                if health['last_seen']:
+                    minutes_ago = int((datetime.now() - health['last_seen']).total_seconds() / 60)
+                    offline_miners.append(f"{device_id} (last seen {minutes_ago}m ago)")
+                else:
+                    offline_miners.append(f"{device_id} (never seen)")
+            elif health['reject_rate'] > reject_threshold:
+                high_reject_miners.append(
+                    f"{device_id} ({health['reject_rate']:.2f}% rejects - "
+                    f"{health['shares_rejected']}/{health['shares_accepted'] + health['shares_rejected']} shares)"
+                )
+
+        if not offline_miners and not high_reject_miners:
+            return ""
+
+        alerts = []
+        alerts.append("```ansi")
+        alerts.append("\x1b[1;33m⚠️  Health Alerts\x1b[0m")
+
+        if offline_miners:
+            alerts.append("")
+            alerts.append("\x1b[0;31m🔴 Offline Miners:\x1b[0m")
+            for miner in offline_miners:
+                alerts.append(f"  • {miner}")
+
+        if high_reject_miners:
+            alerts.append("")
+            alerts.append(f"\x1b[0;33m⚠️  High Reject Rate (>{reject_threshold}%):\x1b[0m")
+            for miner in high_reject_miners:
+                alerts.append(f"  • {miner}")
+
+        alerts.append("```")
+        return "\n".join(alerts)
+
+    def generate_status_report(self, hours: int = 1) -> str:
         """Generate compact status report with ANSI colors.
+
+        Args:
+            hours: Lookback period for averages (default: 1h)
 
         Returns:
             Formatted status string with ANSI color codes (under 2000 chars)
         """
         lines = []
         lines.append("```ansi")  # Start ANSI code block
-        lines.append("\x1b[1;36m⛏️  Bitaxe Swarm (1h avg)\x1b[0m")  # Shorter header
+
+        # Format timespan label
+        if hours >= 24 and hours % 24 == 0:
+            timespan_label = f"{hours//24}d avg"
+        else:
+            timespan_label = f"{hours}h avg"
+
+        lines.append(f"\x1b[1;36m⛏️  Bitaxe Swarm ({timespan_label})\x1b[0m")
 
         # Get summary data
         summary = self.analyzer.get_all_devices_summary()
 
-        # Calculate 1h averages (more meaningful than snapshot)
-        avg_hashrate_1h, avg_power_1h = self.get_swarm_1h_average()
+        # Calculate averages for the specified timespan
+        avg_hashrate, avg_power = self.get_swarm_average(hours)
 
         # Count active miners
         active_count = sum(1 for data in summary.values() if data['latest'])
 
-        # Calculate efficiency from 1h averages
-        avg_efficiency = (avg_power_1h / (avg_hashrate_1h / 1000.0)) if avg_hashrate_1h > 0 else 0
+        # Calculate efficiency from averages
+        avg_efficiency = (avg_power / (avg_hashrate / 1000.0)) if avg_hashrate > 0 else 0
 
         # Compact swarm summary - convert to TH/s
-        lines.append(f"\x1b[0;36m{avg_hashrate_1h/1000:.2f} Th/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{avg_power_1h:.1f}W\x1b[0m")
+        lines.append(f"\x1b[0;36m{avg_hashrate/1000:.2f} Th/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{avg_power:.1f}W\x1b[0m")
         lines.append("")
 
         for device in self.devices:
@@ -325,9 +406,9 @@ class BitaxeBot(commands.Bot):
 
             latest = data['latest']
 
-            # Get 1h averages for hashrate and efficiency
+            # Get averages for the specified timespan
             from datetime import datetime, timedelta
-            lookback = datetime.now() - timedelta(hours=1)
+            lookback = datetime.now() - timedelta(hours=hours)
 
             cursor = self.db.conn.cursor()
             cursor.execute("""
@@ -356,7 +437,7 @@ class BitaxeBot(commands.Bot):
             uptime_str = f"{int(uptime_hours//24)}d" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
 
             # Super compact format - one line per miner - convert to TH/s
-            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq} MHz \x1b[0;36m{avg_hashrate/1000:.2f} TH/s\x1b[0m \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
+            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq} MHz \x1b[0;36m{avg_hashrate/1000:.2f} TH/s\x1b[0m \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m \x1b[0;36m{power:.1f}W\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
 
         lines.append("```")
         return "\n".join(lines)
@@ -405,6 +486,7 @@ class BitaxeBot(commands.Bot):
             freq = latest['frequency']
             hashrate = latest['hashrate']
             efficiency = latest['efficiency_jth']
+            power = latest['power']
             asic_temp = latest['asic_temp']
             vreg_temp = latest['vreg_temp']
             uptime_hours = latest['uptime'] / 3600
@@ -417,7 +499,7 @@ class BitaxeBot(commands.Bot):
             uptime_str = f"{int(uptime_hours//24)}d" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
 
             # Current values format - convert to TH/s
-            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq} MHz \x1b[0;36m{hashrate/1000:.2f} Th/s\x1b[0m \x1b[0;36m{efficiency:.1f} J/TH\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
+            lines.append(f"\x1b[1;37m{device_id}\x1b[0m {freq} MHz \x1b[0;36m{hashrate/1000:.2f} Th/s\x1b[0m \x1b[0;36m{efficiency:.1f} J/TH\x1b[0m \x1b[0;36m{power:.1f}W\x1b[0m {asic_c}{asic_temp:.0f}°\x1b[0m/{vreg_c}{vreg_temp:.0f}°\x1b[0m \x1b[0;32m{uptime_str}\x1b[0m")
 
         lines.append("```")
         return "\n".join(lines)
@@ -585,12 +667,16 @@ class BitaxeBot(commands.Bot):
             swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
             miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
 
-            # Generate text report
-            report = self.generate_status_report()
+            # Generate text report with health alerts (matching chart timespan)
+            health_alerts = self.generate_health_alerts()
+            report = self.generate_status_report(hours)
+
+            # Combine alerts and report
+            full_report = f"{health_alerts}\n{report}" if health_alerts else report
 
             # Send with attachments
             await ctx.send(
-                content=f"**⛏️ Bitaxe Mining Report ({timespan_label})**\n{report}",
+                content=f"**⛏️ Bitaxe Mining Report ({timespan_label})**\n{full_report}",
                 files=[swarm_file, miner_file]
             )
 
@@ -719,13 +805,31 @@ class BitaxeBot(commands.Bot):
         if self.config.allowed_channels and ctx.channel.id not in self.config.allowed_channels:
             return
 
+        # Get health status (offline miners + reject rates)
+        device_ids = [d['name'] for d in self.devices]
+        health_data = self.db.get_all_device_health(device_ids, minutes_threshold=10)
+
         summary = self.analyzer.get_all_devices_summary()
 
         warnings = []
 
         for device_id, data in summary.items():
+            health = health_data.get(device_id, {})
+
+            # Check if offline
+            if not health.get('is_online', False):
+                if health.get('last_seen'):
+                    minutes_ago = int((datetime.now() - health['last_seen']).total_seconds() / 60)
+                    warnings.append(f"🔴 {device_id}: Offline (last seen {minutes_ago}m ago)")
+                else:
+                    warnings.append(f"🔴 {device_id}: No data available")
+                continue
+
+            # Check reject rate
+            if health.get('reject_rate', 0) > 1.0:
+                warnings.append(f"⚠️ {device_id}: High reject rate ({health['reject_rate']:.2f}%)")
+
             if not data or not data['latest']:
-                warnings.append(f"❌ {device_id}: No data available")
                 continue
 
             latest = data['latest']
@@ -748,9 +852,11 @@ class BitaxeBot(commands.Bot):
             message = "⚠️ **Health Check - Warnings Found**\n" + "\n".join(warnings)
         else:
             message = "✅ **Health Check - All Systems Nominal**\n"
+            message += "- All miners online\n"
             message += "- No temperature warnings\n"
             message += "- All voltages stable\n"
-            message += "- All hashrates normal"
+            message += "- All hashrates normal\n"
+            message += "- Reject rates < 1%"
 
         await ctx.send(message)
 
@@ -782,6 +888,7 @@ class BitaxeBot(commands.Bot):
 **Info**
 Charts use 15-min and 24h moving averages with 20% y-axis padding
 Temps shown as dotted lines with 15-min MA
+Reports include health alerts (offline miners, reject rates >1%)
 Hourly auto-reports post 12h charts to #{self.config.auto_report.channel_name}
 Weekly reports post 7d charts every Monday
 Monitoring {len(self.devices)} devices

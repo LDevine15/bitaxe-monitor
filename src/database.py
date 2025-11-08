@@ -4,7 +4,7 @@ import sqlite3
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from .models import PerformanceMetric, ClockConfig
 
 logger = logging.getLogger(__name__)
@@ -440,6 +440,83 @@ class Database:
         cursor = self.conn.cursor()
         cursor.execute("SELECT id FROM devices ORDER BY added_at")
         return [row[0] for row in cursor.fetchall()]
+
+    def get_device_health_status(self, device_id: str, minutes_threshold: int = 10) -> dict:
+        """Get health status for a device.
+
+        Args:
+            device_id: Device identifier
+            minutes_threshold: Minutes since last data to consider device offline
+
+        Returns:
+            Dictionary with health status:
+            {
+                'is_online': bool,
+                'last_seen': datetime or None,
+                'reject_rate': float (0-100),
+                'shares_accepted': int,
+                'shares_rejected': int
+            }
+        """
+        cursor = self.conn.cursor()
+
+        # Get latest metric
+        cursor.execute("""
+            SELECT
+                timestamp,
+                shares_accepted,
+                shares_rejected
+            FROM performance_metrics
+            WHERE device_id = ?
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (device_id,))
+
+        row = cursor.fetchone()
+
+        if not row:
+            return {
+                'is_online': False,
+                'last_seen': None,
+                'reject_rate': 0.0,
+                'shares_accepted': 0,
+                'shares_rejected': 0
+            }
+
+        last_seen = datetime.fromisoformat(row[0])
+        shares_accepted = row[1]
+        shares_rejected = row[2]
+
+        # Check if online (has data within threshold)
+        time_diff = (datetime.now() - last_seen).total_seconds() / 60
+        is_online = time_diff <= minutes_threshold
+
+        # Calculate reject rate
+        total_shares = shares_accepted + shares_rejected
+        reject_rate = (shares_rejected / total_shares * 100) if total_shares > 0 else 0.0
+
+        return {
+            'is_online': is_online,
+            'last_seen': last_seen,
+            'reject_rate': reject_rate,
+            'shares_accepted': shares_accepted,
+            'shares_rejected': shares_rejected
+        }
+
+    def get_all_device_health(self, device_ids: List[str], minutes_threshold: int = 10) -> Dict[str, dict]:
+        """Get health status for all devices.
+
+        Args:
+            device_ids: List of device identifiers
+            minutes_threshold: Minutes since last data to consider device offline
+
+        Returns:
+            Dictionary mapping device_id to health status dict
+        """
+        return {
+            device_id: self.get_device_health_status(device_id, minutes_threshold)
+            for device_id in device_ids
+        }
 
     def close(self):
         """Close database connection."""
