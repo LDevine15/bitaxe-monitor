@@ -441,6 +441,57 @@ class Database:
         cursor.execute("SELECT id FROM devices ORDER BY added_at")
         return [row[0] for row in cursor.fetchall()]
 
+    def get_config_changes(self, device_ids: List[str], minutes: int) -> List[dict]:
+        """Get timestamps when config changed for any device in the swarm.
+
+        Args:
+            device_ids: List of device IDs to check
+            minutes: Lookback period in minutes
+
+        Returns:
+            List of dicts with 'timestamp', 'device_id', 'frequency', 'core_voltage'
+        """
+        cursor = self.conn.cursor()
+        lookback = datetime.now() - timedelta(minutes=minutes)
+
+        # For each device, find where config_id changes
+        config_changes = []
+
+        for device_id in device_ids:
+            cursor.execute("""
+                WITH config_transitions AS (
+                    SELECT
+                        timestamp,
+                        config_id,
+                        LAG(config_id) OVER (ORDER BY timestamp) as prev_config_id
+                    FROM performance_metrics
+                    WHERE device_id = ?
+                      AND timestamp >= ?
+                    ORDER BY timestamp
+                )
+                SELECT
+                    ct.timestamp,
+                    cc.frequency,
+                    cc.core_voltage
+                FROM config_transitions ct
+                JOIN clock_configs cc ON ct.config_id = cc.id
+                WHERE ct.prev_config_id IS NOT NULL
+                  AND ct.config_id != ct.prev_config_id
+                ORDER BY ct.timestamp
+            """, (device_id, lookback))
+
+            for row in cursor.fetchall():
+                config_changes.append({
+                    'timestamp': datetime.fromisoformat(row[0]),
+                    'device_id': device_id,
+                    'frequency': row[1],
+                    'core_voltage': row[2]
+                })
+
+        # Sort by timestamp
+        config_changes.sort(key=lambda x: x['timestamp'])
+        return config_changes
+
     def get_device_health_status(self, device_id: str, minutes_threshold: int = 10) -> dict:
         """Get health status for a device.
 

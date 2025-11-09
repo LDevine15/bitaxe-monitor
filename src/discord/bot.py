@@ -54,6 +54,11 @@ class BitaxeBot(commands.Bot):
         }
         self.chart_generator = ChartGenerator(database, chart_config)
 
+        # Alert state tracking (to avoid spam)
+        self.offline_miners = set()  # Miners currently known to be offline
+        self.overheating_miners = set()  # Miners currently overheating
+        self.highest_diff_seen = 0.0  # Highest difficulty reached by swarm
+
         # Register commands
         self.add_commands()
 
@@ -129,6 +134,19 @@ class BitaxeBot(commands.Bot):
             except ValueError as e:
                 logger.error(f"Weekly report configuration error: {e}")
 
+        # Start alert monitoring if enabled
+        if self.config.alerts.enabled:
+            try:
+                if not self.config.alerts.channel_id:
+                    raise ValueError("alerts.channel_id is required")
+                self.schedule_alert_checks()
+                logger.info(f"Alerts enabled: checking every {self.config.alerts.check_interval_minutes} minutes")
+                logger.info(f"Alert channel: {self.config.alerts.channel_id}")
+                # Initialize highest diff from database
+                self.initialize_highest_diff()
+            except ValueError as e:
+                logger.error(f"Alert configuration error: {e}")
+
         logger.info(f"Bot ready! Monitoring {len(self.devices)} devices")
 
     async def on_command_error(self, ctx, error):
@@ -177,28 +195,29 @@ class BitaxeBot(commands.Bot):
             logger.info(f"Sending auto-report to #{self.config.auto_report.channel_name}")
 
             # Get report parameters
-            hours = self.config.auto_report.graph_lookback_hours
+            hours = self.config.auto_report.graph_lookback_hours  # 12h for charts
             device_ids = [d['name'] for d in self.devices]
 
-            # Generate report with health alerts (with charts if enabled)
+            # Generate health alerts and TWO reports: 12h and 1h
             health_alerts = self.generate_health_alerts()
-            report = self.generate_status_report(hours)
+            report_12h = self.generate_status_report(12)  # 12h averages
+            report_1h = self.generate_status_report(1)    # 1h averages
 
-            # Combine alerts and report
-            full_report = f"{health_alerts}\n{report}" if health_alerts else report
+            # Combine alerts and both reports
+            full_report = health_alerts if health_alerts else ""
+            full_report += f"\n{report_12h}\n{report_1h}"
 
             if self.config.auto_report.include_charts:
-                # Generate charts
-
+                # Generate charts (use 12h for charts)
                 swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
                 miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
 
                 swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
                 miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
 
-                await channel.send(content=f"**⛏️ Hourly Report ({hours}h)**\n{full_report}", files=[swarm_file, miner_file])
+                await channel.send(content=f"**⛏️ Hourly Report**\n{full_report}", files=[swarm_file, miner_file])
             else:
-                await channel.send(full_report)
+                await channel.send(f"**⛏️ Hourly Report**\n{full_report}")
 
             logger.info("Auto-report sent successfully")
         except Exception as e:
@@ -264,6 +283,154 @@ class BitaxeBot(commands.Bot):
             logger.info("Weekly report sent successfully")
         except Exception as e:
             logger.error(f"Failed to send weekly report: {e}", exc_info=e)
+
+    def schedule_alert_checks(self):
+        """Schedule periodic alert checks."""
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        trigger = IntervalTrigger(minutes=self.config.alerts.check_interval_minutes)
+
+        self.scheduler.add_job(
+            self.check_alerts,
+            trigger=trigger,
+            id='alert_checks',
+            name='Alert Checks'
+        )
+
+    def initialize_highest_diff(self):
+        """Initialize highest difficulty from database."""
+        cursor = self.db.conn.cursor()
+        cursor.execute("""
+            SELECT MAX(best_diff) FROM performance_metrics
+            WHERE best_diff IS NOT NULL
+        """)
+        row = cursor.fetchone()
+        if row and row[0]:
+            self.highest_diff_seen = row[0]
+            logger.info(f"Initialized highest diff: {self.highest_diff_seen:,.0f}")
+
+    async def check_alerts(self):
+        """Check for alert conditions and send notifications."""
+        try:
+            channel = self.get_channel(self.config.alerts.channel_id)
+            if not channel:
+                logger.error(f"Alert channel not found: {self.config.alerts.channel_id}")
+                return
+
+            device_ids = [d['name'] for d in self.devices]
+            health_data = self.db.get_all_device_health(device_ids, self.config.alerts.offline_threshold_minutes)
+            summary = self.analyzer.get_all_devices_summary()
+
+            # Check for offline miners
+            await self.check_offline_miners(channel, health_data)
+
+            # Check for overheating
+            await self.check_overheating(channel, summary)
+
+            # Check for new highest difficulty (block finding indicator)
+            await self.check_highest_diff(channel, summary)
+
+        except Exception as e:
+            logger.error(f"Failed to check alerts: {e}", exc_info=e)
+
+    async def check_offline_miners(self, channel, health_data):
+        """Check and alert on offline miners."""
+        currently_offline = set()
+
+        for device_id, health in health_data.items():
+            if not health['is_online']:
+                currently_offline.add(device_id)
+
+                # Only alert if this is newly offline
+                if device_id not in self.offline_miners:
+                    minutes_ago = "unknown"
+                    if health['last_seen']:
+                        minutes_ago = int((datetime.now() - health['last_seen']).total_seconds() / 60)
+
+                    mention = f"<@{self.config.alerts.user_id_to_tag}> " if self.config.alerts.user_id_to_tag else ""
+                    await channel.send(
+                        f"{mention}🔴 **ALERT: Miner Offline**\n"
+                        f"**Device**: {device_id}\n"
+                        f"**Last Seen**: {minutes_ago} minutes ago"
+                    )
+                    logger.warning(f"Alert sent: {device_id} is offline")
+
+        # Check for recovered miners
+        recovered = self.offline_miners - currently_offline
+        for device_id in recovered:
+            await channel.send(
+                f"✅ **Miner Back Online**\n"
+                f"**Device**: {device_id}"
+            )
+            logger.info(f"Alert sent: {device_id} is back online")
+
+        self.offline_miners = currently_offline
+
+    async def check_overheating(self, channel, summary):
+        """Check and alert on overheating miners."""
+        currently_overheating = set()
+        temp_threshold = 65  # °C
+
+        for device_id, data in summary.items():
+            if data and data['latest']:
+                asic_temp = data['latest']['asic_temp']
+
+                if asic_temp >= temp_threshold:
+                    currently_overheating.add(device_id)
+
+                    # Only alert if this is newly overheating
+                    if device_id not in self.overheating_miners:
+                        mention = f"<@{self.config.alerts.user_id_to_tag}> " if self.config.alerts.user_id_to_tag else ""
+                        await channel.send(
+                            f"{mention}🔥 **ALERT: Overheating**\n"
+                            f"**Device**: {device_id}\n"
+                            f"**Temperature**: {asic_temp:.1f}°C (threshold: {temp_threshold}°C)"
+                        )
+                        logger.warning(f"Alert sent: {device_id} is overheating at {asic_temp}°C")
+
+        # Check for cooled down miners
+        cooled_down = self.overheating_miners - currently_overheating
+        for device_id in cooled_down:
+            await channel.send(
+                f"❄️ **Temperature Normal**\n"
+                f"**Device**: {device_id}"
+            )
+            logger.info(f"Alert sent: {device_id} temperature back to normal")
+
+        self.overheating_miners = currently_overheating
+
+    async def check_highest_diff(self, channel, summary):
+        """Check and alert on new highest difficulty."""
+        current_max_diff = 0
+
+        for device_id, data in summary.items():
+            if data and data['latest'] and data['latest'].get('best_diff'):
+                device_diff = data['latest']['best_diff']
+                current_max_diff = max(current_max_diff, device_diff)
+
+        # Alert if we have a new record
+        if current_max_diff > self.highest_diff_seen and current_max_diff > 0:
+            mention = f"<@{self.config.alerts.user_id_to_tag}> " if self.config.alerts.user_id_to_tag else ""
+
+            # Check if this is a block (difficulty typically > 1 trillion for mainnet)
+            is_likely_block = current_max_diff >= 1_000_000_000_000
+
+            if is_likely_block:
+                await channel.send(
+                    f"{mention}🎉🎉🎉 **BLOCK FOUND!!!** 🎉🎉🎉\n"
+                    f"**Difficulty**: {current_max_diff:,.0f}\n"
+                    f"**Previous Record**: {self.highest_diff_seen:,.0f}"
+                )
+                logger.info(f"🎉 BLOCK FOUND! Difficulty: {current_max_diff:,.0f}")
+            else:
+                await channel.send(
+                    f"{mention}🏆 **New Highest Difficulty!**\n"
+                    f"**Difficulty**: {current_max_diff:,.0f}\n"
+                    f"**Previous Record**: {self.highest_diff_seen:,.0f}"
+                )
+                logger.info(f"New highest diff: {current_max_diff:,.0f}")
+
+            self.highest_diff_seen = current_max_diff
 
     def get_swarm_average(self, hours: int) -> tuple[float, float]:
         """Calculate average hashrate and power for entire swarm over specified period.
@@ -887,10 +1054,13 @@ class BitaxeBot(commands.Bot):
 
 **Info**
 Charts use 15-min and 24h moving averages with 20% y-axis padding
-Temps shown as dotted lines with 15-min MA
+Miner detail chart has separate hashrate/temp subplots for clarity
+Diamonds mark config changes (pink on swarm, line color on individual)
+White line shows period average hashrate on swarm charts
 Reports include health alerts (offline miners, reject rates >1%)
 Hourly auto-reports post 12h charts to #{self.config.auto_report.channel_name}
 Weekly reports post 7d charts every Monday
+Real-time alerts: offline miners, overheating (>65°C), new highest diff, blocks!
 Monitoring {len(self.devices)} devices
         """.strip()
 

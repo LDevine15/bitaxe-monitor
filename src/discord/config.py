@@ -25,6 +25,15 @@ class WeeklyReportConfig(BaseModel):
     graph_lookback_hours: int = 168  # 7 days
 
 
+class AlertConfig(BaseModel):
+    """Alert configuration for offline miners."""
+    enabled: bool = False
+    channel_id: Optional[int] = None
+    user_id_to_tag: Optional[int] = None  # Discord user ID to mention
+    check_interval_minutes: int = 5  # How often to check for offline miners
+    offline_threshold_minutes: int = 10  # Minutes without data to consider offline
+
+
 class ChartConfig(BaseModel):
     """Chart generation configuration."""
     dpi: int = 150
@@ -49,6 +58,7 @@ class DiscordConfig(BaseModel):
     allowed_channels: List[int] = Field(default_factory=list)
     auto_report: AutoReportConfig = Field(default_factory=AutoReportConfig)
     weekly_report: WeeklyReportConfig = Field(default_factory=WeeklyReportConfig)
+    alerts: AlertConfig = Field(default_factory=AlertConfig)
     charts: ChartConfig = Field(default_factory=ChartConfig)
     commands: CommandConfig = Field(default_factory=CommandConfig)
 
@@ -76,6 +86,22 @@ class DiscordConfig(BaseModel):
             if 'channel_id' in auto_report and auto_report['channel_id']:
                 auto_report['channel_id'] = int(auto_report['channel_id'])
             yaml_config['auto_report'] = auto_report
+
+        # Convert weekly_report channel_id to int if present
+        if 'weekly_report' in yaml_config:
+            weekly_report = yaml_config['weekly_report'].copy()
+            if 'channel_id' in weekly_report and weekly_report['channel_id']:
+                weekly_report['channel_id'] = int(weekly_report['channel_id'])
+            yaml_config['weekly_report'] = weekly_report
+
+        # Convert alerts channel_id and user_id_to_tag to ints
+        if 'alerts' in yaml_config:
+            alerts = yaml_config['alerts'].copy()
+            if 'channel_id' in alerts and alerts['channel_id']:
+                alerts['channel_id'] = int(alerts['channel_id'])
+            if 'user_id_to_tag' in alerts and alerts['user_id_to_tag']:
+                alerts['user_id_to_tag'] = int(alerts['user_id_to_tag'])
+            yaml_config['alerts'] = alerts
 
         # Convert allowed_channels to ints
         if 'allowed_channels' in yaml_config:
