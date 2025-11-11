@@ -119,11 +119,20 @@ def cmd_stats(analyzer: Analyzer):
             print(f"   {'Config':<18} {'Samples':<8} {'Avg Hash':<12} {'Efficiency':<12} {'Avg Temp':<10} {'Avg Power':<10}")
             print(f"   {'-' * 90}")
 
+            # Get current config if available
+            current_config = None
+            if data['latest']:
+                current_config = f"{data['latest']['frequency']}@{data['latest']['core_voltage']}"
+
             for cfg in data['configs']:
                 config_name = f"{cfg['frequency']}@{cfg['core_voltage']}"
 
                 # Add indicator for best hashrate
                 indicator = "🏆" if cfg == max(data['configs'], key=lambda x: x['avg_hashrate']) else "  "
+
+                # Add green checkmark for current config
+                if config_name == current_config:
+                    indicator = "\033[92m✓\033[0m "  # Green checkmark with ANSI color code
 
                 print(
                     f"   {indicator}{config_name:<16} "

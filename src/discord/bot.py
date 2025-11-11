@@ -369,7 +369,7 @@ class BitaxeBot(commands.Bot):
     async def check_overheating(self, channel, summary):
         """Check and alert on overheating miners."""
         currently_overheating = set()
-        temp_threshold = 65  # °C
+        temp_threshold = 70  # °C - Red flag threshold
 
         for device_id, data in summary.items():
             if data and data['latest']:
@@ -597,7 +597,7 @@ class BitaxeBot(commands.Bot):
             uptime_hours = latest['uptime'] / 3600
 
             # Temp colors
-            asic_c = "\x1b[0;31m" if asic_temp >= 65 else "\x1b[0;33m" if asic_temp >= 60 else "\x1b[0;32m"
+            asic_c = "\x1b[0;31m" if asic_temp >= 70 else "\x1b[0;33m" if asic_temp >= 65 else "\x1b[0;32m"
             vreg_c = "\x1b[0;31m" if vreg_temp >= 80 else "\x1b[0;33m" if vreg_temp >= 70 else "\x1b[0;32m"
 
             # Compact uptime
@@ -659,7 +659,7 @@ class BitaxeBot(commands.Bot):
             uptime_hours = latest['uptime'] / 3600
 
             # Temp colors
-            asic_c = "\x1b[0;31m" if asic_temp >= 65 else "\x1b[0;33m" if asic_temp >= 60 else "\x1b[0;32m"
+            asic_c = "\x1b[0;31m" if asic_temp >= 70 else "\x1b[0;33m" if asic_temp >= 65 else "\x1b[0;32m"
             vreg_c = "\x1b[0;31m" if vreg_temp >= 80 else "\x1b[0;33m" if vreg_temp >= 70 else "\x1b[0;32m"
 
             # Compact uptime
@@ -1002,8 +1002,10 @@ class BitaxeBot(commands.Bot):
             latest = data['latest']
 
             # Check temperature
-            if latest['asic_temp'] >= 65:
-                warnings.append(f"🔥 {device_id}: High ASIC temp ({latest['asic_temp']:.1f}°C)")
+            if latest['asic_temp'] >= 70:
+                warnings.append(f"🔥 {device_id}: OVERHEATING ({latest['asic_temp']:.1f}°C)")
+            elif latest['asic_temp'] >= 65:
+                warnings.append(f"⚠️ {device_id}: Elevated temp ({latest['asic_temp']:.1f}°C)")
             if latest['vreg_temp'] >= 80:
                 warnings.append(f"🔥 {device_id}: High VRM temp ({latest['vreg_temp']:.1f}°C)")
 
@@ -1060,7 +1062,7 @@ White line shows period average hashrate on swarm charts
 Reports include health alerts (offline miners, reject rates >1%)
 Hourly auto-reports post 12h charts to #{self.config.auto_report.channel_name}
 Weekly reports post 7d charts every Monday
-Real-time alerts: offline miners, overheating (>65°C), new highest diff, blocks!
+Real-time alerts: offline miners, overheating (>70°C), new highest diff, blocks!
 Monitoring {len(self.devices)} devices
         """.strip()
 

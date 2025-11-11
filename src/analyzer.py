@@ -150,15 +150,15 @@ class Analyzer:
         warnings = []
 
         # Thermal throttling indicators
-        if config_summary["max_asic_temp"] >= 65:
+        if config_summary["max_asic_temp"] >= 70:
             warnings.append(
-                f"🔥 ASIC thermal limit: {config_summary['max_asic_temp']}°C "
-                f"(may cause throttling at 65°C+)"
+                f"🔥 OVERHEATING: {config_summary['max_asic_temp']}°C "
+                f"(critical - may cause throttling at 70°C+)"
             )
-        elif config_summary["avg_asic_temp"] >= 60:
+        elif config_summary["avg_asic_temp"] >= 65:
             warnings.append(
-                f"⚠️  High ASIC temp: {config_summary['avg_asic_temp']}°C avg "
-                f"(approaching thermal limits)"
+                f"⚠️  Elevated ASIC temp: {config_summary['avg_asic_temp']}°C avg "
+                f"(65-70°C is acceptable but monitor closely)"
             )
 
         # VR overheating
@@ -186,10 +186,10 @@ class Analyzer:
             )
 
         # High power draw
-        if config_summary["max_power"] >= 20:
+        if config_summary["max_power"] >= 35:
             warnings.append(
                 f"⚡ High power draw: {config_summary['max_power']}W peak "
-                f"(approaching 25W PSU limit)"
+                f"(approaching 40W PSU limit)"
             )
 
         # Low hashrate variance (instability indicator)

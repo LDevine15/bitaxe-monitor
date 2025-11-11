@@ -708,9 +708,9 @@ class BitaxeDashboard:
         Returns:
             Border color string ('red', 'yellow', or 'green')
         """
-        if asic_temp >= 65 or vreg_temp >= 80 or voltage < 4.8:
+        if asic_temp >= 70 or vreg_temp >= 80 or voltage < 4.8:
             return "red"
-        elif asic_temp >= 60 or vreg_temp >= 70 or voltage < 4.9:
+        elif asic_temp >= 65 or vreg_temp >= 70 or voltage < 4.9:
             return "yellow"
         return "green"
 
@@ -899,7 +899,7 @@ class BitaxeDashboard:
         # ASIC Temperature with bar
         asic_temp = latest['asic_temp']
         temp_pct = int(asic_temp / 70 * 100)  # 70°C = 100%
-        temp_color = self._get_temp_color(asic_temp, warn_threshold=60, critical_threshold=65)
+        temp_color = self._get_temp_color(asic_temp, warn_threshold=65, critical_threshold=70)
         table.add_row(
             "ASIC Temp:",
             f"[{temp_color}]{asic_temp:.1f}°C[/{temp_color}] {'█' * (temp_pct // 10)}"
@@ -915,11 +915,11 @@ class BitaxeDashboard:
 
         # Power with color coding
         power = latest['power']
-        power_color = "red" if power >= 25 else "yellow" if power >= 24 else "white"
-        power_pct = int(power / 30 * 100)  # 30W = 100%
+        power_color = "red" if power >= 40 else "yellow" if power >= 35 else "white"
+        power_pct = int(power / 40 * 100)  # 40W = 100%
         table.add_row(
             "Power:",
-            f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of 30W)"
+            f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of 40W)"
         )
 
         # 8-hour power range
@@ -947,6 +947,9 @@ class BitaxeDashboard:
 
         # Input Voltage
         voltage = latest['voltage']
+        # Convert from millivolts to volts if needed (legacy data compatibility)
+        if voltage > 100:
+            voltage = voltage / 1000.0
         voltage_color = self._get_voltage_color(voltage)
         table.add_row(
             "Input V:",
@@ -1075,8 +1078,10 @@ class BitaxeDashboard:
 
         # Check for warnings
         warnings = []
-        if asic_temp >= 65:
-            warnings.append("[red]⚠️  THERMAL LIMIT[/red]")
+        if asic_temp >= 70:
+            warnings.append("[red]🔥 OVERHEATING[/red]")
+        elif asic_temp >= 65:
+            warnings.append("[yellow]⚠️  Elevated Temp[/yellow]")
         if vreg_temp >= 80:
             warnings.append("[red]🔥 VR OVERHEATING[/red]")
         elif vreg_temp >= 70:
@@ -1085,9 +1090,9 @@ class BitaxeDashboard:
             warnings.append("[red]⚠️  PSU VOLTAGE SAG[/red]")
         elif voltage < 4.9:
             warnings.append("[yellow]⚠️  Low Input Voltage[/yellow]")
-        if power >= 25:
+        if power >= 40:
             warnings.append("[red]⚠️  HIGH POWER DRAW[/red]")
-        elif power >= 24:
+        elif power >= 35:
             warnings.append("[yellow]⚠️  Approaching PSU Limit[/yellow]")
 
         if warnings:
@@ -1205,7 +1210,7 @@ class BitaxeDashboard:
 
         # ASIC temp
         asic_temp = latest['asic_temp']
-        temp_color = self._get_temp_color(asic_temp, warn_threshold=60, critical_threshold=65)
+        temp_color = self._get_temp_color(asic_temp, warn_threshold=65, critical_threshold=70)
         table.add_row("ASIC:", f"[{temp_color}]{asic_temp:.1f}°C[/{temp_color}]")
 
         # VRM temp
@@ -1215,6 +1220,9 @@ class BitaxeDashboard:
 
         # Voltage
         voltage = latest['voltage']
+        # Convert from millivolts to volts if needed (legacy data compatibility)
+        if voltage > 100:
+            voltage = voltage / 1000.0
         voltage_color = self._get_voltage_color(voltage, lite_mode=True)
         table.add_row("Voltage:", f"[{voltage_color}]{voltage:.2f}V[/{voltage_color}]")
 

@@ -223,10 +223,10 @@ class BitaxeLogger:
         # Format power with color coding
         # ANSI color codes: Yellow=\033[93m, Red=\033[91m, Reset=\033[0m
         power = info.power
-        if power >= 25:
-            power_str = f"\033[91m{power:.1f}W\033[0m"  # Red for 25W+
-        elif power >= 24:
-            power_str = f"\033[93m{power:.1f}W\033[0m"  # Yellow for 24-25W
+        if power >= 40:
+            power_str = f"\033[91m{power:.1f}W\033[0m"  # Red for 40W+
+        elif power >= 35:
+            power_str = f"\033[93m{power:.1f}W\033[0m"  # Yellow for 35-40W
         else:
             power_str = f"{power:.1f}W"  # Normal
 

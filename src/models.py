@@ -16,6 +16,18 @@ class SystemInfo(BaseModel):
     voltage: float
     current: float
 
+    @field_validator('voltage', mode='before')
+    @classmethod
+    def convert_voltage(cls, v: Union[int, float]) -> float:
+        """Convert voltage from millivolts to volts if needed.
+
+        If voltage > 100, assume it's in millivolts and convert to volts.
+        Otherwise, assume it's already in volts.
+        """
+        if v > 100:
+            return v / 1000.0
+        return float(v)
+
     # ASIC Configuration
     frequency: int
     coreVoltage: int = Field(alias="coreVoltage")
