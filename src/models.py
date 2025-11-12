@@ -156,6 +156,7 @@ class PerformanceMetric(BaseModel):
     power: float
     voltage: float
     current: float
+    core_voltage_actual: Optional[int] = None
 
     # Thermal
     asic_temp: float
@@ -200,6 +201,7 @@ class PerformanceMetric(BaseModel):
             power=info.power,
             voltage=info.voltage,
             current=info.current,
+            core_voltage_actual=info.coreVoltageActual,
             asic_temp=info.temp,
             vreg_temp=info.vrTemp,
             fan_speed=info.fanspeed,

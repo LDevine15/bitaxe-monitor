@@ -68,6 +68,16 @@ class Database:
             self.conn.commit()
             logger.info("Mining statistics migration completed successfully")
 
+        # Check if core_voltage_actual column exists
+        cursor.execute("PRAGMA table_info(performance_metrics)")
+        metrics_columns = [row[1] for row in cursor.fetchall()]
+
+        if 'core_voltage_actual' not in metrics_columns:
+            logger.info("Migrating database: Adding actual core voltage tracking...")
+            cursor.execute("ALTER TABLE performance_metrics ADD COLUMN core_voltage_actual INTEGER")
+            self.conn.commit()
+            logger.info("Core voltage actual migration completed successfully")
+
     def init_schema(self):
         """Initialize database schema with tables and indexes."""
         cursor = self.conn.cursor()
@@ -105,6 +115,7 @@ class Database:
                 power REAL,
                 voltage REAL,
                 current REAL,
+                core_voltage_actual INTEGER,
 
                 asic_temp REAL,
                 vreg_temp REAL,
@@ -244,15 +255,15 @@ class Database:
         cursor.execute("""
             INSERT INTO performance_metrics (
                 device_id, timestamp, config_id,
-                hashrate, power, voltage, current,
+                hashrate, power, voltage, current, core_voltage_actual,
                 asic_temp, vreg_temp, fan_speed, fan_rpm,
                 shares_accepted, shares_rejected, uptime,
                 efficiency_jth, efficiency_ghw,
                 best_diff, stratum_diff, rejection_reasons
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             metric.device_id, metric.timestamp, metric.config_id,
-            metric.hashrate, metric.power, metric.voltage, metric.current,
+            metric.hashrate, metric.power, metric.voltage, metric.current, metric.core_voltage_actual,
             metric.asic_temp, metric.vreg_temp, metric.fan_speed, metric.fan_rpm,
             metric.shares_accepted, metric.shares_rejected, metric.uptime,
             metric.efficiency_jth, metric.efficiency_ghw,

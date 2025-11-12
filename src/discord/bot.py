@@ -913,6 +913,7 @@ class BitaxeBot(commands.Bot):
             # Build stats message
             freq = latest['frequency']
             voltage = latest['core_voltage']
+            voltage_actual = latest.get('core_voltage_actual')
             hashrate = latest['hashrate']
             efficiency = latest['efficiency_jth']
             asic_temp = latest['asic_temp']
@@ -936,10 +937,16 @@ class BitaxeBot(commands.Bot):
             # Format uptime
             uptime_str = f"{int(uptime_hours//24)}d {int(uptime_hours%24)}h" if uptime_hours >= 24 else f"{uptime_hours:.1f}h"
 
+            # Format voltage display
+            if voltage_actual is not None:
+                voltage_display = f"{freq} MHz @ {voltage} mV (actual: {voltage_actual} mV)"
+            else:
+                voltage_display = f"{freq} MHz @ {voltage} mV"
+
             stats_msg = f"""**🔍 Detailed Stats: {name} ({timespan_label})**
 
 **Configuration**
-⚙️ Clock: {freq} MHz @ {voltage} mV
+⚙️ Clock: {voltage_display}
 ⏱️ Uptime: {uptime_str}
 
 **Performance**
