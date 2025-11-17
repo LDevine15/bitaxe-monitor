@@ -2,6 +2,7 @@
 """Flask API server for ESP32 display to fetch swarm data."""
 
 import logging
+from datetime import datetime
 from flask import Flask, jsonify
 from flask_cors import CORS
 from src.database import Database
@@ -100,7 +101,7 @@ def get_swarm_data():
             'active_count': active_count,
             'total_count': len(devices),
             'miners': miners,
-            'timestamp': data['latest']['timestamp'] if data and data.get('latest') else None
+            'timestamp': data['latest']['timestamp'] if data and data.get('latest') else None  # DB timestamp (updates every 15s)
         }
 
         logger.info(f"Swarm data requested: {active_count}/{len(devices)} active, {total_hashrate:.2f} GH/s")

@@ -202,43 +202,6 @@ class BitaxeDashboard:
         """Get current draw statistics during the current uptime session."""
         return self._get_session_metric_stats(device_id, uptime_seconds, 'current', precision=2)
 
-    def get_power_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
-        """Get power statistics for a specific timeframe.
-
-        Args:
-            device_id: Device identifier
-            hours: Lookback period in hours
-
-        Returns:
-            Dictionary with min, max, avg, samples or None if no data
-        """
-        from datetime import timedelta
-
-        lookback_time = datetime.now() - timedelta(hours=hours)
-
-        cursor = self.db.conn.cursor()
-        cursor.execute("""
-            SELECT
-                MIN(power) as min_power,
-                MAX(power) as max_power,
-                AVG(power) as avg_power,
-                COUNT(*) as sample_count
-            FROM performance_metrics
-            WHERE device_id = ?
-              AND timestamp >= ?
-              AND power IS NOT NULL
-        """, (device_id, lookback_time))
-
-        row = cursor.fetchone()
-        if row and row[0] is not None and row[3] > 0:
-            return {
-                'min': round(row[0], 2),
-                'max': round(row[1], 2),
-                'avg': round(row[2], 2),
-                'samples': row[3]
-            }
-        return None
-
     def get_hashrate_stats_timeframe(self, device_id: str, hours: float) -> Optional[Dict]:
         """Get hashrate statistics for a specific timeframe.
 
@@ -761,9 +724,6 @@ class BitaxeDashboard:
         avg_hashrate = self.get_uptime_average_hashrate(device_id, uptime_seconds)
         avg_efficiency = self.get_uptime_average_efficiency(device_id, uptime_seconds)
 
-        # Get 8-hour power statistics
-        power_stats = self.get_power_stats_timeframe(device_id, 8)
-
         # Get multi-timeframe variance
         variance_data = self.get_multi_timeframe_variance(device_id)
 
@@ -922,28 +882,6 @@ class BitaxeDashboard:
             f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of 40W)"
         )
 
-        # 8-hour power range
-        if power_stats:
-            power_range = power_stats['max'] - power_stats['min']
-            power_avg = power_stats['avg']
-            range_str = f"{power_stats['min']:.1f}-{power_stats['max']:.1f}W (avg: {power_avg:.1f}W)"
-            range_pct = (power_range / power_avg * 100) if power_avg > 0 else 0
-
-            # Color code based on range stability
-            if range_pct < 10:
-                range_color = "green"
-                stability = "Stable"
-            elif range_pct < 20:
-                range_color = "yellow"
-                stability = "Variable"
-            else:
-                range_color = "red"
-                stability = "Unstable"
-
-            table.add_row(
-                "Watts (Last 8h):",
-                f"[{range_color}]{range_str}[/{range_color}] [dim]({stability}, {power_stats['samples']} samples)[/dim]"
-            )
 
         # Input Voltage
         voltage = latest['voltage']
