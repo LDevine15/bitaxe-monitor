@@ -24,29 +24,39 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.database import Database
 from src.analyzer import Analyzer
+from src.remote_provider import RemoteProvider
 
 
 class BitaxeDashboard:
     """Real-time terminal dashboard for Bitaxe monitoring."""
 
-    def __init__(self, config: dict, db: Database, analyzer: Analyzer, lite_mode: bool = False):
+    def __init__(self, config: dict, db: Database = None, analyzer: Analyzer = None,
+                 lite_mode: bool = False, remote_provider: RemoteProvider = None):
         """Initialize dashboard.
 
         Args:
             config: Configuration dictionary
-            db: Database instance
-            analyzer: Analyzer instance
+            db: Database instance (for local mode)
+            analyzer: Analyzer instance (for local mode)
             lite_mode: Use compact lite mode for 4+ miners
+            remote_provider: Remote API provider (for remote mode)
         """
         self.config = config
         self.db = db
         self.analyzer = analyzer
+        self.remote = remote_provider
         self.console = Console()
         self.running = False
         self.lite_mode = lite_mode
 
+        # Determine if we're in remote mode
+        self.is_remote = remote_provider is not None
+
         # Get enabled devices
-        self.devices = [d for d in config["devices"] if d.get("enabled", True)]
+        if self.is_remote:
+            self.devices = [d for d in remote_provider.get_devices() if d.get("enabled", True)]
+        else:
+            self.devices = [d for d in config["devices"] if d.get("enabled", True)]
 
         # Ping tracking for session statistics
         self.ping_history = {}  # {device_id: [ping1, ping2, ...]}
@@ -106,6 +116,10 @@ class BitaxeDashboard:
         Returns:
             Average hashrate or None if no data
         """
+        if self.is_remote:
+            result = self.remote.get_uptime_averages(device_id, uptime_seconds)
+            return result.get('avg_hashrate')
+
         from datetime import timedelta
 
         # Calculate when device was rebooted
@@ -135,6 +149,10 @@ class BitaxeDashboard:
         Returns:
             Average efficiency (J/TH) or None if no data
         """
+        if self.is_remote:
+            result = self.remote.get_uptime_averages(device_id, uptime_seconds)
+            return result.get('avg_efficiency')
+
         from datetime import timedelta
 
         # Calculate when device was rebooted
@@ -167,6 +185,9 @@ class BitaxeDashboard:
         Returns:
             Dictionary with min, max, avg, samples or None if no data
         """
+        if self.is_remote:
+            return self.remote.get_session_stats(device_id, metric, uptime_seconds)
+
         from datetime import timedelta
 
         reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
@@ -261,6 +282,9 @@ class BitaxeDashboard:
         Returns:
             List of average hashrate values per bucket (most recent last)
         """
+        if self.is_remote:
+            return self.remote.get_hashrate_trend(device_id, minutes, num_buckets)
+
         from datetime import timedelta
 
         lookback_time = datetime.now() - timedelta(minutes=minutes)
@@ -357,6 +381,9 @@ class BitaxeDashboard:
         Returns:
             Dictionary with session_hours and total_hours or None if no data
         """
+        if self.is_remote:
+            return self.remote.get_total_uptime(device_id)
+
         cursor = self.db.conn.cursor()
 
         # Get all uptime values ordered by time
@@ -412,6 +439,9 @@ class BitaxeDashboard:
         Returns:
             Dictionary with best_diff and best_session_diff or None if no data
         """
+        if self.is_remote:
+            return self.remote.get_highest_difficulty(device_id)
+
         cursor = self.db.conn.cursor()
         cursor.execute("""
             SELECT
@@ -439,6 +469,9 @@ class BitaxeDashboard:
         Returns:
             Dictionary mapping timeframe labels to dictionaries containing variance, mean, median, and sample count
         """
+        if self.is_remote:
+            return self.remote.get_variance(device_id)
+
         timeframes = {
             '1h': (60, 30),    # 60 minutes, 30 buckets (2-min each)
             '4h': (240, 48),   # 4 hours, 48 buckets (5-min each)
@@ -710,11 +743,14 @@ class BitaxeDashboard:
         device_ip = self._get_device_ip(device_id)
 
         # Get device info for pool data
-        cursor = self.db.conn.cursor()
-        cursor.execute("SELECT * FROM devices WHERE id = ?", (device_id,))
-        device_info = cursor.fetchone()
-
-        latest = self.db.get_latest_metric(device_id)
+        if self.is_remote:
+            device_info = self.remote.get_device_info(device_id)
+            latest = self.remote.get_latest_metric(device_id)
+        else:
+            cursor = self.db.conn.cursor()
+            cursor.execute("SELECT * FROM devices WHERE id = ?", (device_id,))
+            device_info = cursor.fetchone()
+            latest = self.db.get_latest_metric(device_id)
 
         if not latest:
             return self._create_no_data_panel(device_id, device_ip, "No data available")
@@ -770,7 +806,11 @@ class BitaxeDashboard:
 
         # Pool information
         if device_info:
-            device_dict = dict(device_info)
+            # Handle both dict (remote) and Row (local) objects
+            if isinstance(device_info, dict):
+                device_dict = device_info
+            else:
+                device_dict = dict(device_info)
             stratum_url = device_dict.get('stratum_url')
             stratum_port = device_dict.get('stratum_port')
 
@@ -1073,7 +1113,10 @@ class BitaxeDashboard:
         # Get device IP from config
         device_ip = self._get_device_ip(device_id)
 
-        latest = self.db.get_latest_metric(device_id)
+        if self.is_remote:
+            latest = self.remote.get_latest_metric(device_id)
+        else:
+            latest = self.db.get_latest_metric(device_id)
 
         if not latest:
             return self._create_no_data_panel(device_id, device_ip, "No data")
@@ -1182,7 +1225,10 @@ class BitaxeDashboard:
 
     def create_summary_panel(self) -> Panel:
         """Create summary panel with overall stats."""
-        summary = self.analyzer.get_all_devices_summary()
+        if self.is_remote:
+            summary = self.remote.get_summary()
+        else:
+            summary = self.analyzer.get_all_devices_summary()
 
         table = Table.grid(padding=(0, 2))
         table.add_column(style="bold cyan")
@@ -1316,23 +1362,52 @@ def main():
         action="store_true",
         help="Use compact lite mode for monitoring 4+ miners"
     )
+    parser.add_argument(
+        "--remote",
+        type=str,
+        help="Remote API URL (overrides config.yaml setting)"
+    )
     args = parser.parse_args()
 
     # Load config
     config = load_config()
-    db_path = config["logging"]["database_path"]
 
-    # Initialize
-    db = Database(db_path)
-    analyzer = Analyzer(db)
+    # Check for remote API URL (command line takes precedence)
+    remote_url = args.remote
+    if not remote_url:
+        remote_url = config.get("dashboard", {}).get("remote_api_url", "")
 
-    # Create and run dashboard
-    dashboard = BitaxeDashboard(config, db, analyzer, lite_mode=args.lite)
+    if remote_url:
+        # Remote mode - fetch data from API server
+        print(f"Connecting to remote API: {remote_url}")
+        remote = RemoteProvider(remote_url)
 
-    try:
-        dashboard.run(refresh_interval=5)
-    finally:
-        db.close()
+        # Health check
+        if not remote.health_check():
+            print(f"Error: Cannot connect to API server at {remote_url}")
+            print("Make sure the API server is running on the remote host.")
+            sys.exit(1)
+
+        # Create and run dashboard in remote mode
+        dashboard = BitaxeDashboard(config, lite_mode=args.lite, remote_provider=remote)
+
+        try:
+            dashboard.run(refresh_interval=5)
+        except KeyboardInterrupt:
+            pass
+    else:
+        # Local mode - use local database
+        db_path = config["logging"]["database_path"]
+        db = Database(db_path)
+        analyzer = Analyzer(db)
+
+        # Create and run dashboard
+        dashboard = BitaxeDashboard(config, db, analyzer, lite_mode=args.lite)
+
+        try:
+            dashboard.run(refresh_interval=5)
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

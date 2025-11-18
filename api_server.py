@@ -118,6 +118,340 @@ def health_check():
     return jsonify({'status': 'ok'})
 
 
+# =============================================================================
+# Dashboard API Endpoints
+# =============================================================================
+
+@app.route('/api/devices', methods=['GET'])
+def get_devices():
+    """Get list of configured devices."""
+    return jsonify({
+        'devices': devices
+    })
+
+
+@app.route('/api/metrics/latest/<device_id>', methods=['GET'])
+def get_latest_metric(device_id):
+    """Get latest metrics for a specific device."""
+    try:
+        latest = db.get_latest_metric(device_id)
+        if not latest:
+            return jsonify({'error': 'No data found'}), 404
+        return jsonify(latest)
+    except Exception as e:
+        logger.error(f"Error getting latest metric for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/uptime-avg/<device_id>/<int:uptime_seconds>', methods=['GET'])
+def get_uptime_averages(device_id, uptime_seconds):
+    """Get average hashrate and efficiency during current uptime period."""
+    from datetime import datetime, timedelta
+
+    try:
+        reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
+        cursor = db.conn.cursor()
+
+        # Get average hashrate
+        cursor.execute("""
+            SELECT AVG(hashrate) as avg_hashrate
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+        """, (device_id, reboot_time))
+        row = cursor.fetchone()
+        avg_hashrate = round(row[0], 1) if row and row[0] else None
+
+        # Get average efficiency
+        cursor.execute("""
+            SELECT AVG(efficiency_jth) as avg_efficiency
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+              AND efficiency_jth IS NOT NULL
+        """, (device_id, reboot_time))
+        row = cursor.fetchone()
+        avg_efficiency = round(row[0], 1) if row and row[0] else None
+
+        return jsonify({
+            'avg_hashrate': avg_hashrate,
+            'avg_efficiency': avg_efficiency
+        })
+    except Exception as e:
+        logger.error(f"Error getting uptime averages for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/session-stats/<device_id>/<metric>/<int:uptime_seconds>', methods=['GET'])
+def get_session_stats(device_id, metric, uptime_seconds):
+    """Get statistics for a metric during the current uptime session."""
+    from datetime import datetime, timedelta
+
+    # Whitelist allowed metrics to prevent SQL injection
+    allowed_metrics = ['power', 'current', 'hashrate', 'asic_temp', 'vreg_temp']
+    if metric not in allowed_metrics:
+        return jsonify({'error': f'Invalid metric. Allowed: {allowed_metrics}'}), 400
+
+    try:
+        reboot_time = datetime.now() - timedelta(seconds=uptime_seconds)
+        cursor = db.conn.cursor()
+
+        cursor.execute(f"""
+            SELECT
+                MIN({metric}) as min_val,
+                MAX({metric}) as max_val,
+                AVG({metric}) as avg_val,
+                COUNT(*) as sample_count
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+              AND {metric} IS NOT NULL
+        """, (device_id, reboot_time))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None and row[3] > 0:
+            return jsonify({
+                'min': round(row[0], 2),
+                'max': round(row[1], 2),
+                'avg': round(row[2], 2),
+                'samples': row[3]
+            })
+        return jsonify(None)
+    except Exception as e:
+        logger.error(f"Error getting session stats for {device_id}/{metric}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/hashrate-trend/<device_id>', methods=['GET'])
+def get_hashrate_trend(device_id):
+    """Get bucketed hashrate trend for visualization."""
+    from datetime import datetime, timedelta
+    from flask import request
+
+    minutes = request.args.get('minutes', 60, type=int)
+    num_buckets = request.args.get('buckets', 30, type=int)
+
+    try:
+        lookback_time = datetime.now() - timedelta(minutes=minutes)
+        bucket_size_minutes = minutes / num_buckets
+
+        cursor = db.conn.cursor()
+        cursor.execute("""
+            SELECT hashrate, timestamp
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND timestamp >= ?
+            ORDER BY timestamp ASC
+        """, (device_id, lookback_time))
+
+        rows = cursor.fetchall()
+        if not rows:
+            return jsonify([])
+
+        # Group samples into buckets and average
+        buckets = [[] for _ in range(num_buckets)]
+        start_time = datetime.fromisoformat(rows[0][1])
+
+        for hashrate, timestamp_str in rows:
+            timestamp = datetime.fromisoformat(timestamp_str)
+            elapsed_minutes = (timestamp - start_time).total_seconds() / 60
+            bucket_idx = int(elapsed_minutes / bucket_size_minutes)
+            if bucket_idx >= num_buckets:
+                bucket_idx = num_buckets - 1
+            buckets[bucket_idx].append(hashrate)
+
+        # Calculate average for each bucket
+        averages = []
+        for bucket in buckets:
+            if bucket:
+                averages.append(sum(bucket) / len(bucket))
+            elif averages:
+                averages.append(averages[-1])
+
+        return jsonify(averages)
+    except Exception as e:
+        logger.error(f"Error getting hashrate trend for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/total-uptime/<device_id>', methods=['GET'])
+def get_total_uptime(device_id):
+    """Calculate total cumulative uptime vs current session uptime."""
+    try:
+        cursor = db.conn.cursor()
+        cursor.execute("""
+            SELECT uptime, timestamp
+            FROM performance_metrics
+            WHERE device_id = ?
+            ORDER BY timestamp ASC
+        """, (device_id,))
+
+        rows = cursor.fetchall()
+        if not rows:
+            return jsonify(None)
+
+        current_uptime = rows[-1][0]
+        MAX_RESTART_UPTIME = 3600  # 1 hour
+
+        total_uptime = 0
+        prev_uptime = 0
+        session_start_idx = 0
+
+        for i, (uptime, timestamp) in enumerate(rows):
+            if uptime < prev_uptime and uptime < MAX_RESTART_UPTIME:
+                session_uptimes = [rows[j][0] for j in range(session_start_idx, i)]
+                if session_uptimes:
+                    total_uptime += max(session_uptimes)
+                session_start_idx = i
+            prev_uptime = uptime
+
+        total_uptime += current_uptime
+
+        return jsonify({
+            'session_hours': current_uptime / 3600,
+            'total_hours': total_uptime / 3600
+        })
+    except Exception as e:
+        logger.error(f"Error getting total uptime for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/highest-difficulty/<device_id>', methods=['GET'])
+def get_highest_difficulty(device_id):
+    """Get the highest difficulty ever achieved by this device."""
+    try:
+        cursor = db.conn.cursor()
+        cursor.execute("""
+            SELECT
+                MAX(best_diff) as max_best_diff,
+                MAX(best_session_diff) as max_session_diff
+            FROM performance_metrics
+            WHERE device_id = ?
+              AND best_diff IS NOT NULL
+        """, (device_id,))
+
+        row = cursor.fetchone()
+        if row and row[0] is not None:
+            return jsonify({
+                'all_time': row[0],
+                'session': row[1] if row[1] else row[0]
+            })
+        return jsonify(None)
+    except Exception as e:
+        logger.error(f"Error getting highest difficulty for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/metrics/variance/<device_id>', methods=['GET'])
+def get_multi_timeframe_variance(device_id):
+    """Get variance percentages for multiple timeframes."""
+    from datetime import datetime, timedelta
+
+    timeframes = {
+        '1h': (60, 30),
+        '4h': (240, 48),
+        '8h': (480, 48),
+        '24h': (1440, 24),
+        '3d': (4320, 36)
+    }
+
+    results = {}
+
+    try:
+        for label, (minutes, num_buckets) in timeframes.items():
+            lookback_time = datetime.now() - timedelta(minutes=minutes)
+            bucket_size_minutes = minutes / num_buckets
+
+            cursor = db.conn.cursor()
+            cursor.execute("""
+                SELECT hashrate, timestamp
+                FROM performance_metrics
+                WHERE device_id = ?
+                  AND timestamp >= ?
+                ORDER BY timestamp ASC
+            """, (device_id, lookback_time))
+
+            rows = cursor.fetchall()
+            if not rows:
+                results[label] = None
+                continue
+
+            # Group into buckets
+            buckets = [[] for _ in range(num_buckets)]
+            start_time = datetime.fromisoformat(rows[0][1])
+
+            for hashrate, timestamp_str in rows:
+                timestamp = datetime.fromisoformat(timestamp_str)
+                elapsed_minutes = (timestamp - start_time).total_seconds() / 60
+                bucket_idx = int(elapsed_minutes / bucket_size_minutes)
+                if bucket_idx >= num_buckets:
+                    bucket_idx = num_buckets - 1
+                buckets[bucket_idx].append(hashrate)
+
+            # Calculate averages
+            hashrates = []
+            for bucket in buckets:
+                if bucket:
+                    hashrates.append(sum(bucket) / len(bucket))
+                elif hashrates:
+                    hashrates.append(hashrates[-1])
+
+            if hashrates and len(hashrates) > 1:
+                min_hr = min(hashrates)
+                max_hr = max(hashrates)
+                avg_hr = sum(hashrates) / len(hashrates)
+
+                sorted_hrs = sorted(hashrates)
+                n = len(sorted_hrs)
+                if n % 2 == 0:
+                    median_hr = (sorted_hrs[n//2 - 1] + sorted_hrs[n//2]) / 2
+                else:
+                    median_hr = sorted_hrs[n//2]
+
+                variance_pct = ((max_hr - min_hr) / avg_hr * 100) if avg_hr > 0 else 0
+
+                results[label] = {
+                    'variance': round(variance_pct, 1),
+                    'mean': round(avg_hr, 1),
+                    'median': round(median_hr, 1),
+                    'samples': len(hashrates)
+                }
+            else:
+                results[label] = None
+
+        return jsonify(results)
+    except Exception as e:
+        logger.error(f"Error getting variance for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/device-info/<device_id>', methods=['GET'])
+def get_device_info(device_id):
+    """Get device info from devices table."""
+    try:
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT * FROM devices WHERE id = ?", (device_id,))
+        row = cursor.fetchone()
+
+        if row:
+            return jsonify(dict(row))
+        return jsonify(None)
+    except Exception as e:
+        logger.error(f"Error getting device info for {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/summary', methods=['GET'])
+def get_summary():
+    """Get summary for all devices."""
+    try:
+        summary = analyzer.get_all_devices_summary()
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"Error getting summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     logger.info(f"Starting API server for {len(devices)} device(s)")
     logger.info(f"Database: {db_path}")
