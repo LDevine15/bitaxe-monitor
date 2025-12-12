@@ -63,10 +63,37 @@ discord:
 
   # Command-specific settings
   commands:
-    status:
-      cooldown: 10                # Seconds between uses per user
-    report:
-      cooldown: 60                # Seconds between uses per user
-      max_hours: 168              # Max lookback (7 days)
-    miner:
-      cooldown: 30                # Seconds between uses per user
+    status_cooldown: 10           # Seconds between uses per user
+    report_cooldown: 60           # Seconds between uses per user
+    report_max_hours: 336         # Max lookback (14 days)
+    miner_cooldown: 30            # Seconds between uses per user
+
+  # Weekly report: Posts detailed 7-day report
+  weekly_report:
+    enabled: true
+    channel_name: "swarm"
+    channel_id: 1234567890123456789   # Your Discord channel ID
+    schedule: "0 12 * * 1"            # Monday at 12:00 UTC
+    include_charts: true
+    graph_lookback_hours: 168         # 7 days
+
+  # Offline miner alerts: Alerts when a miner goes down
+  alerts:
+    enabled: true
+    channel_id: 1234567890123456789   # Channel for alerts
+    user_id_to_tag: 1234567890123456789  # Discord user ID to mention (optional)
+    check_interval_minutes: 1         # Check every 1 minute
+    offline_threshold_minutes: 2      # Consider offline after 2 min without data
+
+  # Remote control commands (!restart, !clock, !voltage, !fan)
+  control:
+    enabled: true
+    admin_role_id: 0                  # Discord role ID required (0 = no restriction)
+    admin_role_name: "Miner Admin"    # Display name for the role
+    # Safety limits to prevent damage
+    min_frequency: 400                # MHz - minimum allowed frequency
+    max_frequency: 650                # MHz - maximum allowed frequency
+    min_voltage: 1000                 # mV - minimum core voltage
+    max_voltage: 1300                 # mV - maximum core voltage
+    min_fan_speed: 0                  # % - minimum fan speed
+    max_fan_speed: 100                # % - maximum fan speed
