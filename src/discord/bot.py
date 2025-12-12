@@ -12,6 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from ..database import Database
 from ..analyzer import Analyzer
+from ..api_client import BitaxeClient
 from .config import DiscordConfig
 from .chart_generator import ChartGenerator
 
@@ -106,6 +107,67 @@ class BitaxeBot(commands.Bot):
         async def help_command(ctx):
             """Show available commands."""
             await self.cmd_help(ctx)
+
+        # Control commands (require admin role)
+        @self.command(name='restart')
+        async def restart_command(ctx, miner_name: str):
+            """Restart a specific miner."""
+            await self.cmd_restart(ctx, miner_name)
+
+        @self.command(name='restart-all')
+        async def restart_all_command(ctx):
+            """Restart all miners."""
+            await self.cmd_restart_all(ctx)
+
+        @self.command(name='clock')
+        async def clock_command(ctx, miner_name: str, frequency: int):
+            """Set miner frequency (MHz)."""
+            await self.cmd_clock(ctx, miner_name, frequency)
+
+        @self.command(name='voltage')
+        async def voltage_command(ctx, miner_name: str, voltage: int):
+            """Set miner core voltage (mV)."""
+            await self.cmd_voltage(ctx, miner_name, voltage)
+
+        @self.command(name='fan')
+        async def fan_command(ctx, miner_name: str, speed: int):
+            """Set miner fan speed (%)."""
+            await self.cmd_fan(ctx, miner_name, speed)
+
+    def get_device_by_name(self, name: str) -> Optional[dict]:
+        """Find device config by name (case-insensitive).
+
+        Args:
+            name: Device name to search for
+
+        Returns:
+            Device config dict or None if not found
+        """
+        name_lower = name.lower()
+        for device in self.devices:
+            if device['name'].lower() == name_lower:
+                return device
+        return None
+
+    def has_control_permission(self, ctx) -> bool:
+        """Check if user has permission to use control commands.
+
+        Args:
+            ctx: Discord context
+
+        Returns:
+            True if user has permission, False otherwise
+        """
+        if not self.config.control.enabled:
+            return False
+
+        # If no admin role configured (role_id = 0), allow everyone
+        if not self.config.control.admin_role_id:
+            return True
+
+        # Check if user has the admin role
+        role = discord.utils.get(ctx.author.roles, id=self.config.control.admin_role_id)
+        return role is not None
 
     async def on_ready(self):
         """Called when bot is connected and ready."""
@@ -1036,9 +1098,165 @@ class BitaxeBot(commands.Bot):
 
         await ctx.send(message)
 
+    # Control command handlers
+    async def cmd_restart(self, ctx, miner_name: str):
+        """Handle !restart command."""
+        logger.info(f"!restart {miner_name} command from {ctx.author.name}")
+
+        if not self.has_control_permission(ctx):
+            await ctx.send(f"❌ You don't have permission to use control commands. Required role: {self.config.control.admin_role_name}")
+            return
+
+        device = self.get_device_by_name(miner_name)
+        if not device:
+            device_names = [d['name'] for d in self.devices]
+            await ctx.send(f"❌ Unknown miner: {miner_name}\nAvailable: {', '.join(device_names)}")
+            return
+
+        try:
+            async with BitaxeClient(device['ip']) as client:
+                await client.restart()
+            await ctx.send(f"🔄 Restarting **{device['name']}**... (device will be offline briefly)")
+            logger.info(f"Restart command sent to {device['name']} by {ctx.author.name}")
+        except Exception as e:
+            logger.error(f"Failed to restart {device['name']}: {e}")
+            await ctx.send(f"❌ Failed to restart {device['name']}: {str(e)}")
+
+    async def cmd_restart_all(self, ctx):
+        """Handle !restart-all command."""
+        logger.info(f"!restart-all command from {ctx.author.name}")
+
+        if not self.has_control_permission(ctx):
+            await ctx.send(f"❌ You don't have permission to use control commands. Required role: {self.config.control.admin_role_name}")
+            return
+
+        await ctx.send(f"🔄 Restarting all {len(self.devices)} miners...")
+
+        success = []
+        failed = []
+
+        for device in self.devices:
+            try:
+                async with BitaxeClient(device['ip']) as client:
+                    await client.restart()
+                success.append(device['name'])
+            except Exception as e:
+                logger.error(f"Failed to restart {device['name']}: {e}")
+                failed.append(f"{device['name']} ({str(e)})")
+
+        result = f"✅ Restarted: {', '.join(success)}" if success else ""
+        if failed:
+            result += f"\n❌ Failed: {', '.join(failed)}"
+
+        await ctx.send(result)
+        logger.info(f"Restart-all completed by {ctx.author.name}: {len(success)} success, {len(failed)} failed")
+
+    async def cmd_clock(self, ctx, miner_name: str, frequency: int):
+        """Handle !clock command."""
+        logger.info(f"!clock {miner_name} {frequency} command from {ctx.author.name}")
+
+        if not self.has_control_permission(ctx):
+            await ctx.send(f"❌ You don't have permission to use control commands. Required role: {self.config.control.admin_role_name}")
+            return
+
+        device = self.get_device_by_name(miner_name)
+        if not device:
+            device_names = [d['name'] for d in self.devices]
+            await ctx.send(f"❌ Unknown miner: {miner_name}\nAvailable: {', '.join(device_names)}")
+            return
+
+        # Validate frequency limits
+        min_freq = self.config.control.min_frequency
+        max_freq = self.config.control.max_frequency
+        if frequency < min_freq or frequency > max_freq:
+            await ctx.send(f"❌ Frequency must be between {min_freq} and {max_freq} MHz")
+            return
+
+        try:
+            async with BitaxeClient(device['ip']) as client:
+                await client.set_frequency(frequency)
+            await ctx.send(f"⚙️ Set **{device['name']}** frequency to **{frequency} MHz**")
+            logger.info(f"Clock set to {frequency}MHz on {device['name']} by {ctx.author.name}")
+        except Exception as e:
+            logger.error(f"Failed to set clock on {device['name']}: {e}")
+            await ctx.send(f"❌ Failed to set clock on {device['name']}: {str(e)}")
+
+    async def cmd_voltage(self, ctx, miner_name: str, voltage: int):
+        """Handle !voltage command."""
+        logger.info(f"!voltage {miner_name} {voltage} command from {ctx.author.name}")
+
+        if not self.has_control_permission(ctx):
+            await ctx.send(f"❌ You don't have permission to use control commands. Required role: {self.config.control.admin_role_name}")
+            return
+
+        device = self.get_device_by_name(miner_name)
+        if not device:
+            device_names = [d['name'] for d in self.devices]
+            await ctx.send(f"❌ Unknown miner: {miner_name}\nAvailable: {', '.join(device_names)}")
+            return
+
+        # Validate voltage limits
+        min_volt = self.config.control.min_voltage
+        max_volt = self.config.control.max_voltage
+        if voltage < min_volt or voltage > max_volt:
+            await ctx.send(f"❌ Voltage must be between {min_volt} and {max_volt} mV")
+            return
+
+        try:
+            async with BitaxeClient(device['ip']) as client:
+                await client.set_voltage(voltage)
+            await ctx.send(f"⚡ Set **{device['name']}** voltage to **{voltage} mV**")
+            logger.info(f"Voltage set to {voltage}mV on {device['name']} by {ctx.author.name}")
+        except Exception as e:
+            logger.error(f"Failed to set voltage on {device['name']}: {e}")
+            await ctx.send(f"❌ Failed to set voltage on {device['name']}: {str(e)}")
+
+    async def cmd_fan(self, ctx, miner_name: str, speed: int):
+        """Handle !fan command."""
+        logger.info(f"!fan {miner_name} {speed} command from {ctx.author.name}")
+
+        if not self.has_control_permission(ctx):
+            await ctx.send(f"❌ You don't have permission to use control commands. Required role: {self.config.control.admin_role_name}")
+            return
+
+        device = self.get_device_by_name(miner_name)
+        if not device:
+            device_names = [d['name'] for d in self.devices]
+            await ctx.send(f"❌ Unknown miner: {miner_name}\nAvailable: {', '.join(device_names)}")
+            return
+
+        # Validate fan speed limits
+        min_fan = self.config.control.min_fan_speed
+        max_fan = self.config.control.max_fan_speed
+        if speed < min_fan or speed > max_fan:
+            await ctx.send(f"❌ Fan speed must be between {min_fan}% and {max_fan}%")
+            return
+
+        try:
+            async with BitaxeClient(device['ip']) as client:
+                await client.set_fan_speed(speed)
+            await ctx.send(f"🌀 Set **{device['name']}** fan speed to **{speed}%**")
+            logger.info(f"Fan set to {speed}% on {device['name']} by {ctx.author.name}")
+        except Exception as e:
+            logger.error(f"Failed to set fan on {device['name']}: {e}")
+            await ctx.send(f"❌ Failed to set fan on {device['name']}: {str(e)}")
+
     async def cmd_help(self, ctx):
         """Handle !help command."""
         prefix = self.config.command_prefix
+
+        # Build control commands section if enabled
+        control_section = ""
+        if self.config.control.enabled:
+            control_section = f"""
+**Remote Control** (requires {self.config.control.admin_role_name} role)
+`{prefix}restart <miner>` - Restart a miner
+`{prefix}restart-all` - Restart all miners
+`{prefix}clock <miner> <MHz>` - Set frequency ({self.config.control.min_frequency}-{self.config.control.max_frequency} MHz)
+`{prefix}voltage <miner> <mV>` - Set core voltage ({self.config.control.min_voltage}-{self.config.control.max_voltage} mV)
+`{prefix}fan <miner> <%>` - Set fan speed ({self.config.control.min_fan_speed}-{self.config.control.max_fan_speed}%)
+
+"""
 
         help_text = f"""
 ⛏️ **Bitaxe Monitor Bot Commands**
@@ -1049,8 +1267,7 @@ class BitaxeBot(commands.Bot):
 `{prefix}report [hours|days]` - Performance report with charts (default: 24h)
 `{prefix}miner <name> [hours|days]` - Individual miner deep-dive (default: 24h)
 `{prefix}health` - Check for warnings and issues
-
-**Examples**
+{control_section}**Examples**
 `{prefix}status` - Quick check (instant values)
 `{prefix}stats` - All clock configs tested, efficiency rankings
 `{prefix}report` - 24-hour report with charts (default)

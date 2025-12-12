@@ -123,6 +123,63 @@ class BitaxeClient:
         async with self.session.post(url) as response:
             response.raise_for_status()
 
+    async def set_frequency(self, frequency: int) -> None:
+        """Update device frequency.
+
+        Args:
+            frequency: Frequency in MHz
+
+        Raises:
+            aiohttp.ClientError: On connection/HTTP errors
+        """
+        if not self.session:
+            raise RuntimeError("Client not initialized. Use 'async with' context manager.")
+
+        payload = {"frequency": frequency}
+        url = f"{self.base_url}/api/system"
+        logger.info(f"Setting {self.ip_address} frequency: {frequency}MHz")
+
+        async with self.session.patch(url, json=payload) as response:
+            response.raise_for_status()
+
+    async def set_voltage(self, core_voltage: int) -> None:
+        """Update device core voltage.
+
+        Args:
+            core_voltage: Core voltage in mV
+
+        Raises:
+            aiohttp.ClientError: On connection/HTTP errors
+        """
+        if not self.session:
+            raise RuntimeError("Client not initialized. Use 'async with' context manager.")
+
+        payload = {"coreVoltage": core_voltage}
+        url = f"{self.base_url}/api/system"
+        logger.info(f"Setting {self.ip_address} voltage: {core_voltage}mV")
+
+        async with self.session.patch(url, json=payload) as response:
+            response.raise_for_status()
+
+    async def set_fan_speed(self, fan_speed: int) -> None:
+        """Update device fan speed.
+
+        Args:
+            fan_speed: Fan speed percentage (0-100)
+
+        Raises:
+            aiohttp.ClientError: On connection/HTTP errors
+        """
+        if not self.session:
+            raise RuntimeError("Client not initialized. Use 'async with' context manager.")
+
+        payload = {"fanspeed": fan_speed}
+        url = f"{self.base_url}/api/system"
+        logger.info(f"Setting {self.ip_address} fan speed: {fan_speed}%")
+
+        async with self.session.patch(url, json=payload) as response:
+            response.raise_for_status()
+
     async def health_check(self) -> bool:
         """Check if device is reachable.
 

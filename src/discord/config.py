@@ -50,6 +50,20 @@ class CommandConfig(BaseModel):
     miner_cooldown: int = 30
 
 
+class ControlConfig(BaseModel):
+    """Remote control configuration for miner commands."""
+    enabled: bool = False
+    admin_role_id: Optional[int] = None  # Discord role ID required for control commands
+    admin_role_name: str = "Miner Admin"  # For display purposes
+    # Safety limits
+    min_frequency: int = 400  # MHz
+    max_frequency: int = 650  # MHz
+    min_voltage: int = 1000  # mV
+    max_voltage: int = 1300  # mV
+    min_fan_speed: int = 0  # %
+    max_fan_speed: int = 100  # %
+
+
 class DiscordConfig(BaseModel):
     """Discord bot configuration."""
     enabled: bool = False
@@ -61,6 +75,7 @@ class DiscordConfig(BaseModel):
     alerts: AlertConfig = Field(default_factory=AlertConfig)
     charts: ChartConfig = Field(default_factory=ChartConfig)
     commands: CommandConfig = Field(default_factory=CommandConfig)
+    control: ControlConfig = Field(default_factory=ControlConfig)
 
     @classmethod
     def from_yaml(cls, yaml_config: dict) -> 'DiscordConfig':
@@ -108,6 +123,13 @@ class DiscordConfig(BaseModel):
             yaml_config['allowed_channels'] = [
                 int(ch) for ch in yaml_config['allowed_channels']
             ]
+
+        # Convert control admin_role_id to int if present
+        if 'control' in yaml_config:
+            control = yaml_config['control'].copy()
+            if 'admin_role_id' in control and control['admin_role_id']:
+                control['admin_role_id'] = int(control['admin_role_id'])
+            yaml_config['control'] = control
 
         return cls(token=token, **{k: v for k, v in yaml_config.items() if k != 'token'})
 
