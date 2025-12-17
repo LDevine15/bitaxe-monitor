@@ -463,6 +463,17 @@ def get_summary():
 
 
 if __name__ == '__main__':
+    import signal
+    import sys
+
+    def signal_handler(sig, frame):
+        logger.info("Shutting down API server...")
+        db.close()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
     logger.info(f"Starting API server for {len(devices)} device(s)")
     logger.info(f"Database: {db_path}")
     logger.info("API endpoints:")
@@ -471,4 +482,5 @@ if __name__ == '__main__':
 
     # Run on all interfaces so ESP32 can connect
     # Using port 5001 (port 5000 conflicts with macOS AirPlay Receiver)
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    # threaded=True allows handling multiple requests and cleaner shutdown
+    app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)
