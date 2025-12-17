@@ -1,5 +1,6 @@
 """Discord bot for Bitaxe monitoring."""
 
+import asyncio
 import io
 import logging
 from datetime import datetime
@@ -260,19 +261,23 @@ class BitaxeBot(commands.Bot):
             hours = self.config.auto_report.graph_lookback_hours  # 12h for charts
             device_ids = [d['name'] for d in self.devices]
 
-            # Generate health alerts and TWO reports: 12h and 1h
-            health_alerts = self.generate_health_alerts()
-            report_12h = self.generate_status_report(12)  # 12h averages
-            report_1h = self.generate_status_report(1)    # 1h averages
+            # Generate health alerts and TWO reports: 12h and 1h (run blocking calls in executor)
+            health_alerts = await self._run_blocking(self.generate_health_alerts)
+            report_12h = await self._run_blocking(self.generate_status_report, 12)  # 12h averages
+            report_1h = await self._run_blocking(self.generate_status_report, 1)    # 1h averages
 
             # Combine alerts and both reports
             full_report = health_alerts if health_alerts else ""
             full_report += f"\n{report_12h}\n{report_1h}"
 
             if self.config.auto_report.include_charts:
-                # Generate charts (use 12h for charts)
-                swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
-                miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
+                # Generate charts (use 12h for charts) - run in executor
+                swarm_chart = await self._run_blocking(
+                    self.chart_generator.generate_swarm_hashrate_chart, hours, device_ids
+                )
+                miner_chart = await self._run_blocking(
+                    self.chart_generator.generate_miner_detail_chart, hours, device_ids
+                )
 
                 swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
                 miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
@@ -320,17 +325,21 @@ class BitaxeBot(commands.Bot):
             hours = self.config.weekly_report.graph_lookback_hours
             device_ids = [d['name'] for d in self.devices]
 
-            # Generate text report with health alerts
-            health_alerts = self.generate_health_alerts()
-            report = self.generate_status_report(hours)
+            # Generate text report with health alerts (run blocking calls in executor)
+            health_alerts = await self._run_blocking(self.generate_health_alerts)
+            report = await self._run_blocking(self.generate_status_report, hours)
 
             # Combine alerts and report
             full_report = f"{health_alerts}\n{report}" if health_alerts else report
 
             if self.config.weekly_report.include_charts:
-                # Generate charts
-                swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
-                miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
+                # Generate charts - run in executor
+                swarm_chart = await self._run_blocking(
+                    self.chart_generator.generate_swarm_hashrate_chart, hours, device_ids
+                )
+                miner_chart = await self._run_blocking(
+                    self.chart_generator.generate_miner_detail_chart, hours, device_ids
+                )
 
                 swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_7d.png")
                 miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_7d.png")
@@ -359,8 +368,24 @@ class BitaxeBot(commands.Bot):
             name='Alert Checks'
         )
 
-    def initialize_highest_diff(self):
-        """Initialize highest difficulty from database."""
+    async def _run_blocking(self, func, *args, **kwargs):
+        """Run a blocking function in a thread executor.
+
+        Args:
+            func: The blocking function to run
+            *args: Positional arguments to pass to func
+            **kwargs: Keyword arguments to pass to func
+
+        Returns:
+            The result of the function call
+        """
+        loop = asyncio.get_event_loop()
+        if args or kwargs:
+            return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
+        return await loop.run_in_executor(None, func)
+
+    def _init_highest_diff_sync(self):
+        """Synchronous helper to initialize highest difficulty."""
         cursor = self.db.conn.cursor()
         cursor.execute("""
             SELECT MAX(best_diff) FROM performance_metrics
@@ -371,6 +396,10 @@ class BitaxeBot(commands.Bot):
             self.highest_diff_seen = row[0]
             logger.info(f"Initialized highest diff: {self.highest_diff_seen:,.0f}")
 
+    def initialize_highest_diff(self):
+        """Initialize highest difficulty from database (sync, called once at startup)."""
+        self._init_highest_diff_sync()
+
     async def check_alerts(self):
         """Check for alert conditions and send notifications."""
         try:
@@ -380,8 +409,12 @@ class BitaxeBot(commands.Bot):
                 return
 
             device_ids = [d['name'] for d in self.devices]
-            health_data = self.db.get_all_device_health(device_ids, self.config.alerts.offline_threshold_minutes)
-            summary = self.analyzer.get_all_devices_summary()
+
+            # Run blocking DB calls in executor to avoid blocking the event loop
+            health_data = await self._run_blocking(
+                self.db.get_all_device_health, device_ids, self.config.alerts.offline_threshold_minutes
+            )
+            summary = await self._run_blocking(self.analyzer.get_all_devices_summary)
 
             # Check for offline miners
             await self.check_offline_miners(channel, health_data)
@@ -741,7 +774,7 @@ class BitaxeBot(commands.Bot):
         if self.config.allowed_channels and ctx.channel.id not in self.config.allowed_channels:
             return
 
-        report = self.generate_status_snapshot()
+        report = await self._run_blocking(self.generate_status_snapshot)
         await ctx.send(report)
 
     async def cmd_stats(self, ctx):
@@ -755,23 +788,27 @@ class BitaxeBot(commands.Bot):
         await ctx.send("📊 Generating detailed statistics report...")
 
         try:
-            # Run stats.py stats command
-            import subprocess
-            result = subprocess.run(
-                ['python', 'stats.py', 'stats'],
-                capture_output=True,
-                text=True,
-                timeout=30
+            # Run stats.py stats command asynchronously
+            proc = await asyncio.create_subprocess_exec(
+                'python', 'stats.py', 'stats',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
-
-            if result.returncode != 0:
-                await ctx.send(f"❌ Failed to generate stats: {result.stderr[:500]}")
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await ctx.send("❌ Stats generation timed out")
                 return
 
-            stats_output = result.stdout
+            if proc.returncode != 0:
+                await ctx.send(f"❌ Failed to generate stats: {stderr.decode()[:500]}")
+                return
 
-            # Convert text to image for mobile-friendly viewing
-            stats_image = self._text_to_image(stats_output)
+            stats_output = stdout.decode()
+
+            # Convert text to image for mobile-friendly viewing (run in executor)
+            stats_image = await self._run_blocking(self._text_to_image, stats_output)
 
             # Send as image
             file = discord.File(io.BytesIO(stats_image), filename='bitaxe_stats.png')
@@ -782,8 +819,6 @@ class BitaxeBot(commands.Bot):
 
             logger.info("Stats sent successfully")
 
-        except subprocess.TimeoutExpired:
-            await ctx.send("❌ Stats generation timed out")
         except Exception as e:
             logger.error(f"Failed to generate stats: {e}", exc_info=e)
             await ctx.send(f"❌ Failed to generate stats: {str(e)}")
@@ -885,20 +920,24 @@ class BitaxeBot(commands.Bot):
             # Get device IDs
             device_ids = [d['name'] for d in self.devices]
 
-            # Generate charts
+            # Generate charts (run in executor to avoid blocking)
             logger.info("Generating swarm hashrate chart...")
-            swarm_chart = self.chart_generator.generate_swarm_hashrate_chart(hours, device_ids)
+            swarm_chart = await self._run_blocking(
+                self.chart_generator.generate_swarm_hashrate_chart, hours, device_ids
+            )
 
             logger.info("Generating miner detail chart...")
-            miner_chart = self.chart_generator.generate_miner_detail_chart(hours, device_ids)
+            miner_chart = await self._run_blocking(
+                self.chart_generator.generate_miner_detail_chart, hours, device_ids
+            )
 
             # Create Discord files
             swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
             miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
 
-            # Generate text report with health alerts (matching chart timespan)
-            health_alerts = self.generate_health_alerts()
-            report = self.generate_status_report(hours)
+            # Generate text report with health alerts (matching chart timespan) - run in executor
+            health_alerts = await self._run_blocking(self.generate_health_alerts)
+            report = await self._run_blocking(self.generate_status_report, hours)
 
             # Combine alerts and report
             full_report = f"{health_alerts}\n{report}" if health_alerts else report
@@ -958,16 +997,18 @@ class BitaxeBot(commands.Bot):
         await ctx.send(f"🔍 Generating {timespan_label} stats for **{name}**...")
 
         try:
-            # Get latest metrics for this miner
-            latest = self.db.get_latest_metric(name)
+            # Get latest metrics for this miner (run in executor)
+            latest = await self._run_blocking(self.db.get_latest_metric, name)
 
             if not latest:
                 await ctx.send(f"❌ No data available for {name}")
                 return
 
-            # Generate chart with custom timeframe
+            # Generate chart with custom timeframe (run in executor)
             logger.info(f"Generating chart for {name} ({hours}h)")
-            chart = self.chart_generator.generate_single_miner_chart(name, hours)
+            chart = await self._run_blocking(
+                self.chart_generator.generate_single_miner_chart, name, hours
+            )
 
             # Create Discord file
             chart_file = discord.File(io.BytesIO(chart), filename=f"{name}_{hours}h.png")
@@ -983,16 +1024,19 @@ class BitaxeBot(commands.Bot):
             power = latest['power']
             uptime_hours = latest['uptime'] / 3600
 
-            # Calculate 1h average for comparison
-            from datetime import datetime, timedelta
-            lookback = datetime.now() - timedelta(hours=1)
-            cursor = self.db.conn.cursor()
-            cursor.execute("""
-                SELECT AVG(hashrate) as avg_hr, AVG(efficiency_jth) as avg_eff
-                FROM performance_metrics
-                WHERE device_id = ? AND timestamp >= ? AND efficiency_jth IS NOT NULL
-            """, (name, lookback))
-            row = cursor.fetchone()
+            # Calculate 1h average for comparison (run in executor)
+            def get_1h_avg():
+                from datetime import datetime, timedelta
+                lookback = datetime.now() - timedelta(hours=1)
+                cursor = self.db.conn.cursor()
+                cursor.execute("""
+                    SELECT AVG(hashrate) as avg_hr, AVG(efficiency_jth) as avg_eff
+                    FROM performance_metrics
+                    WHERE device_id = ? AND timestamp >= ? AND efficiency_jth IS NOT NULL
+                """, (name, lookback))
+                return cursor.fetchone()
+
+            row = await self._run_blocking(get_1h_avg)
             avg_hashrate = row[0] if row and row[0] else hashrate
             avg_efficiency = row[1] if row and row[1] else efficiency
 
@@ -1041,11 +1085,13 @@ class BitaxeBot(commands.Bot):
         if self.config.allowed_channels and ctx.channel.id not in self.config.allowed_channels:
             return
 
-        # Get health status (offline miners + reject rates)
+        # Get health status (offline miners + reject rates) - run in executor
         device_ids = [d['name'] for d in self.devices]
-        health_data = self.db.get_all_device_health(device_ids, minutes_threshold=10)
+        health_data = await self._run_blocking(
+            self.db.get_all_device_health, device_ids, 10
+        )
 
-        summary = self.analyzer.get_all_devices_summary()
+        summary = await self._run_blocking(self.analyzer.get_all_devices_summary)
 
         warnings = []
 
