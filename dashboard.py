@@ -472,48 +472,8 @@ class BitaxeDashboard:
         if self.is_remote:
             return self.remote.get_variance(device_id)
 
-        timeframes = {
-            '1h': (60, 30),    # 60 minutes, 30 buckets (2-min each)
-            '4h': (240, 48),   # 4 hours, 48 buckets (5-min each)
-            '8h': (480, 48),   # 8 hours, 48 buckets (10-min each)
-            '24h': (1440, 24), # 24 hours, 24 buckets (1-hour each)
-            '3d': (4320, 36)   # 3 days, 36 buckets (2-hour each)
-        }
-
-        results = {}
-        for label, (minutes, buckets) in timeframes.items():
-            # Get bucketed averages (same as trend graphs)
-            hashrates = self.get_bucketed_hashrate_trend(device_id, minutes, buckets)
-
-            if hashrates and len(hashrates) > 1:
-                min_hr = min(hashrates)
-                max_hr = max(hashrates)
-                avg_hr = sum(hashrates) / len(hashrates)
-
-                # Calculate median
-                sorted_hrs = sorted(hashrates)
-                n = len(sorted_hrs)
-                if n % 2 == 0:
-                    median_hr = (sorted_hrs[n//2 - 1] + sorted_hrs[n//2]) / 2
-                else:
-                    median_hr = sorted_hrs[n//2]
-
-                # Calculate variance from bucketed averages
-                if avg_hr > 0:
-                    variance_pct = ((max_hr - min_hr) / avg_hr * 100)
-                else:
-                    variance_pct = 0
-
-                results[label] = {
-                    'variance': round(variance_pct, 1),
-                    'mean': round(avg_hr, 1),
-                    'median': round(median_hr, 1),
-                    'samples': len(hashrates)
-                }
-            else:
-                results[label] = None
-
-        return results
+        # Use analyzer's cached method for local mode
+        return self.analyzer.get_multi_timeframe_variance(device_id)
 
     def _get_device_ip(self, device_id: str) -> str:
         """Get device IP from config.

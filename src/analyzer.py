@@ -1,9 +1,39 @@
 """Analysis tools for Bitaxe performance data."""
 
 import sqlite3
+import time
+from functools import wraps
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 from .database import Database
+
+
+def timed_cache(seconds: int = 5):
+    """Cache decorator that expires after N seconds.
+
+    Works with instance methods by excluding 'self' from cache key.
+    """
+    def decorator(func):
+        cache = {}
+
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            # Create cache key from args (excluding self)
+            key = (args, tuple(sorted(kwargs.items())))
+            now = time.time()
+
+            if key in cache:
+                result, timestamp = cache[key]
+                if now - timestamp < seconds:
+                    return result
+
+            result = func(self, *args, **kwargs)
+            cache[key] = (result, now)
+            return result
+
+        wrapper.cache_clear = lambda: cache.clear()
+        return wrapper
+    return decorator
 
 
 class Analyzer:
@@ -17,6 +47,7 @@ class Analyzer:
         """
         self.db = db
 
+    @timed_cache(seconds=10)
     def get_config_summary(
         self,
         device_id: str,
@@ -115,6 +146,7 @@ class Analyzer:
         """
         return self.db.get_latest_metric(device_id)
 
+    @timed_cache(seconds=5)
     def get_all_devices_summary(self) -> Dict[str, Dict]:
         """Get summary for all devices.
 
@@ -335,3 +367,55 @@ class Analyzer:
             # Write data
             for row in cursor.fetchall():
                 f.write(','.join(str(v) for v in row) + '\n')
+
+    @timed_cache(seconds=10)
+    def get_multi_timeframe_variance(self, device_id: str) -> Dict[str, Optional[Dict]]:
+        """Get hashrate variance percentages for multiple timeframes.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dictionary mapping timeframe labels to variance stats
+        """
+        timeframes = {
+            '1h': (60, 30),
+            '4h': (240, 48),
+            '8h': (480, 48),
+            '24h': (1440, 24),
+            '3d': (4320, 36)
+        }
+
+        results = {}
+
+        for label, (minutes, num_buckets) in timeframes.items():
+            # Use database's bucketed method
+            hashrates = self.db.get_bucketed_hashrate_trend(device_id, minutes, num_buckets)
+
+            # Filter out None values
+            valid_hashrates = [h for h in hashrates if h is not None]
+
+            if valid_hashrates and len(valid_hashrates) > 1:
+                min_hr = min(valid_hashrates)
+                max_hr = max(valid_hashrates)
+                avg_hr = sum(valid_hashrates) / len(valid_hashrates)
+
+                sorted_hrs = sorted(valid_hashrates)
+                n = len(sorted_hrs)
+                if n % 2 == 0:
+                    median_hr = (sorted_hrs[n//2 - 1] + sorted_hrs[n//2]) / 2
+                else:
+                    median_hr = sorted_hrs[n//2]
+
+                variance_pct = ((max_hr - min_hr) / avg_hr * 100) if avg_hr > 0 else 0
+
+                results[label] = {
+                    'variance': round(variance_pct, 1),
+                    'mean': round(avg_hr, 1),
+                    'median': round(median_hr, 1),
+                    'samples': len(valid_hashrates)
+                }
+            else:
+                results[label] = None
+
+        return results

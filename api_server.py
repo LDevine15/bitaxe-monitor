@@ -348,80 +348,8 @@ def get_highest_difficulty(device_id):
 @app.route('/api/metrics/variance/<device_id>', methods=['GET'])
 def get_multi_timeframe_variance(device_id):
     """Get variance percentages for multiple timeframes."""
-    from datetime import datetime, timedelta
-
-    timeframes = {
-        '1h': (60, 30),
-        '4h': (240, 48),
-        '8h': (480, 48),
-        '24h': (1440, 24),
-        '3d': (4320, 36)
-    }
-
-    results = {}
-
     try:
-        for label, (minutes, num_buckets) in timeframes.items():
-            lookback_time = datetime.now() - timedelta(minutes=minutes)
-            bucket_size_minutes = minutes / num_buckets
-
-            cursor = db.conn.cursor()
-            cursor.execute("""
-                SELECT hashrate, timestamp
-                FROM performance_metrics
-                WHERE device_id = ?
-                  AND timestamp >= ?
-                ORDER BY timestamp ASC
-            """, (device_id, lookback_time))
-
-            rows = cursor.fetchall()
-            if not rows:
-                results[label] = None
-                continue
-
-            # Group into buckets
-            buckets = [[] for _ in range(num_buckets)]
-            start_time = datetime.fromisoformat(rows[0][1])
-
-            for hashrate, timestamp_str in rows:
-                timestamp = datetime.fromisoformat(timestamp_str)
-                elapsed_minutes = (timestamp - start_time).total_seconds() / 60
-                bucket_idx = int(elapsed_minutes / bucket_size_minutes)
-                if bucket_idx >= num_buckets:
-                    bucket_idx = num_buckets - 1
-                buckets[bucket_idx].append(hashrate)
-
-            # Calculate averages
-            hashrates = []
-            for bucket in buckets:
-                if bucket:
-                    hashrates.append(sum(bucket) / len(bucket))
-                elif hashrates:
-                    hashrates.append(hashrates[-1])
-
-            if hashrates and len(hashrates) > 1:
-                min_hr = min(hashrates)
-                max_hr = max(hashrates)
-                avg_hr = sum(hashrates) / len(hashrates)
-
-                sorted_hrs = sorted(hashrates)
-                n = len(sorted_hrs)
-                if n % 2 == 0:
-                    median_hr = (sorted_hrs[n//2 - 1] + sorted_hrs[n//2]) / 2
-                else:
-                    median_hr = sorted_hrs[n//2]
-
-                variance_pct = ((max_hr - min_hr) / avg_hr * 100) if avg_hr > 0 else 0
-
-                results[label] = {
-                    'variance': round(variance_pct, 1),
-                    'mean': round(avg_hr, 1),
-                    'median': round(median_hr, 1),
-                    'samples': len(hashrates)
-                }
-            else:
-                results[label] = None
-
+        results = analyzer.get_multi_timeframe_variance(device_id)
         return jsonify(results)
     except Exception as e:
         logger.error(f"Error getting variance for {device_id}: {e}")

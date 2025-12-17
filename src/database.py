@@ -29,7 +29,9 @@ class Database:
 
         # Enable WAL mode for better concurrent access across multiple processes
         self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA busy_timeout=30000")
+        self.conn.execute("PRAGMA busy_timeout=60000")  # 60s timeout for multi-process access
+        self.conn.execute("PRAGMA synchronous=NORMAL")  # Faster than FULL, safe with WAL
+        self.conn.execute("PRAGMA cache_size=-64000")   # 64MB cache (default is 2MB)
 
         self.init_schema()
         logger.info(f"Database initialized at {db_path}")
@@ -586,7 +588,12 @@ class Database:
         }
 
     def close(self):
-        """Close database connection."""
+        """Close database connection with WAL checkpoint."""
         if self.conn:
+            try:
+                # Checkpoint WAL to main database file before closing
+                self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception as e:
+                logger.warning(f"WAL checkpoint failed: {e}")
             self.conn.close()
             logger.info("Database connection closed")
