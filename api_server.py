@@ -94,8 +94,20 @@ def get_swarm_data():
         # Calculate average efficiency
         avg_efficiency = (total_power / (total_hashrate / 1000.0)) if total_hashrate > 0 else 0
 
-        # Use simple Unix timestamp to avoid parsing issues on ESP32
-        import time
+        # Get timestamp from actual database data (reflects when data was collected)
+        # Convert ISO timestamp to Unix timestamp for easy ESP32 parsing
+        latest_timestamp = None
+        for device in devices:
+            device_id = device['name']
+            data = summary.get(device_id)
+            if data and data['latest'] and data['latest'].get('timestamp'):
+                try:
+                    # Parse ISO format: "2025-12-18 09:23:36.908064"
+                    dt = datetime.fromisoformat(data['latest']['timestamp'])
+                    latest_timestamp = str(int(dt.timestamp()))
+                    break
+                except (ValueError, TypeError):
+                    pass
 
         response = {
             'total_hashrate': round(total_hashrate, 2),  # GH/s
@@ -104,7 +116,7 @@ def get_swarm_data():
             'active_count': active_count,
             'total_count': len(devices),
             'miners': miners,
-            'timestamp': str(int(time.time()))  # Simple unix timestamp as string
+            'timestamp': latest_timestamp  # Unix timestamp from actual data
         }
 
         logger.info(f"Swarm data requested: {active_count}/{len(devices)} active, {total_hashrate:.2f} GH/s")
