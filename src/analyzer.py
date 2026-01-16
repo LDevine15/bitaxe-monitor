@@ -146,7 +146,7 @@ class Analyzer:
         """
         return self.db.get_latest_metric(device_id)
 
-    @timed_cache(seconds=5)
+    @timed_cache(seconds=2)
     def get_all_devices_summary(self) -> Dict[str, Dict]:
         """Get summary for all devices.
 
