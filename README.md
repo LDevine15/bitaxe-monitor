@@ -88,6 +88,9 @@ The logger will:
 ### 4. Analyze Data
 
 ```bash
+# View all configurations with average performance (sorted by frequency)
+python stats.py stats
+
 # View configuration performance summary
 python stats.py compare bitaxe-1
 
