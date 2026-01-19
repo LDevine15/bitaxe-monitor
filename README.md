@@ -27,6 +27,23 @@ A Python-based monitoring and analysis tool for Bitaxe ASIC Bitcoin miners. Auto
 - **Remote control**: Restart miners, adjust clock/voltage/fan via Discord
 - **Alerts**: Real-time notifications for offline miners and overheating
 
+## Screenshots
+
+### Terminal Dashboard
+![Terminal Dashboard](img/bitaxe-dashboard.png)
+
+### Stats Report
+![Stats Report](img/bitaxe-stats.png)
+
+### Discord Bot
+![Discord Bot](img/discord_bot.png)
+
+### Swarm Hashrate Chart
+![Swarm Hashrate](img/swarm_hashrate_12h.jpg)
+
+### Per-Miner Details Chart
+![Miner Details](img/miner_details_12h.jpg)
+
 ## Quick Start
 
 ### 1. Setup
