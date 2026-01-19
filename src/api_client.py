@@ -164,6 +164,8 @@ class BitaxeClient:
     async def set_fan_speed(self, fan_speed: int) -> None:
         """Update device fan speed.
 
+        Disables auto fan mode and sets manual fan speed.
+
         Args:
             fan_speed: Fan speed percentage (0-100)
 
@@ -173,7 +175,8 @@ class BitaxeClient:
         if not self.session:
             raise RuntimeError("Client not initialized. Use 'async with' context manager.")
 
-        payload = {"fanspeed": fan_speed}
+        # Disable auto mode and set manual fan speed
+        payload = {"autofanspeed": 0, "manualFanSpeed": fan_speed}
         url = f"{self.base_url}/api/system"
         logger.info(f"Setting {self.ip_address} fan speed: {fan_speed}%")
 
