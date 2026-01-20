@@ -42,6 +42,12 @@ class SystemInfo(BaseModel):
     fanrpm: int
     autofanspeed: Optional[int] = None
 
+    @field_validator('fanspeed', 'fanrpm', mode='before')
+    @classmethod
+    def convert_fan_values(cls, v: Union[int, float]) -> int:
+        """Convert fan values to int (some firmware returns floats)."""
+        return int(v)
+
     # Mining Statistics
     sharesAccepted: int = Field(alias="sharesAccepted")
     sharesRejected: int = Field(alias="sharesRejected")
