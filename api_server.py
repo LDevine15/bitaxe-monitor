@@ -307,6 +307,85 @@ def get_hashrate_trend(device_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/swarm/hashrate-trend', methods=['GET'])
+def get_swarm_hashrate_trend():
+    """Get combined swarm hashrate trend for visualization."""
+    from datetime import timedelta
+    from flask import request
+
+    minutes = request.args.get('minutes', 120, type=int)  # Default 2 hours
+    num_buckets = request.args.get('buckets', 60, type=int)  # Default 60 points
+
+    try:
+        # Get max timestamp as reference (handles stale data)
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT MAX(timestamp) FROM performance_metrics")
+        max_row = cursor.fetchone()
+
+        if not max_row or not max_row[0]:
+            return jsonify({'labels': [], 'data': []})
+
+        end_time = datetime.fromisoformat(max_row[0])
+        start_time = end_time - timedelta(minutes=minutes)
+        bucket_size_minutes = minutes / num_buckets
+
+        # Get all hashrates in the time range
+        device_ids = [d['name'] for d in devices]
+        placeholders = ','.join('?' * len(device_ids))
+
+        cursor.execute(f"""
+            SELECT hashrate, timestamp, device_id
+            FROM performance_metrics
+            WHERE device_id IN ({placeholders})
+              AND timestamp >= ?
+            ORDER BY timestamp ASC
+        """, device_ids + [start_time])
+
+        rows = cursor.fetchall()
+        if not rows:
+            return jsonify({'labels': [], 'data': []})
+
+        # Group samples into buckets by time, then sum across devices
+        # Each bucket: {device_id: [hashrates]}
+        buckets = [{} for _ in range(num_buckets)]
+
+        for hashrate, timestamp_str, device_id in rows:
+            ts = datetime.fromisoformat(timestamp_str)
+            elapsed_minutes = (ts - start_time).total_seconds() / 60
+            bucket_idx = int(elapsed_minutes / bucket_size_minutes)
+            if bucket_idx >= num_buckets:
+                bucket_idx = num_buckets - 1
+            if bucket_idx < 0:
+                bucket_idx = 0
+
+            if device_id not in buckets[bucket_idx]:
+                buckets[bucket_idx][device_id] = []
+            buckets[bucket_idx][device_id].append(hashrate)
+
+        # Calculate swarm total for each bucket (sum of device averages)
+        data = []
+        labels = []
+        for i, bucket in enumerate(buckets):
+            bucket_time = start_time + timedelta(minutes=i * bucket_size_minutes)
+            labels.append(bucket_time.strftime('%H:%M'))
+
+            if bucket:
+                # Sum the average hashrate of each device in this bucket
+                total = sum(
+                    sum(hrs) / len(hrs) for hrs in bucket.values()
+                )
+                data.append(round(total, 1))
+            elif data:
+                data.append(data[-1])  # Carry forward last value
+            else:
+                data.append(None)
+
+        return jsonify({'labels': labels, 'data': data})
+    except Exception as e:
+        logger.error(f"Error getting swarm hashrate trend: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/metrics/total-uptime/<device_id>', methods=['GET'])
 def get_total_uptime(device_id):
     """Calculate total cumulative uptime vs current session uptime."""

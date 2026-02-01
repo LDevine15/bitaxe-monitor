@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bitaxe Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --bg-primary: #0d1117;
@@ -311,6 +312,14 @@
             </div>
         </div>
 
+        <!-- Hashrate Chart -->
+        <div class="swarm-summary" style="margin-bottom: 24px;">
+            <h2>Hashrate (2h)</h2>
+            <div style="height: 200px;">
+                <canvas id="hashrateChart"></canvas>
+            </div>
+        </div>
+
         <div class="miner-grid" id="minerGrid">
             <div class="loading">Loading miners...</div>
         </div>
@@ -319,6 +328,7 @@
     <script>
         const REFRESH_INTERVAL = 10000; // 10 seconds
         let refreshTimer;
+        let hashrateChart = null;
 
         function formatHashrate(ghps) {
             if (ghps >= 1000) {
@@ -346,6 +356,67 @@
             if (temp >= 70) return 'var(--accent-red)';
             if (temp >= 65) return 'var(--accent-yellow)';
             return 'var(--accent-green)';
+        }
+
+        async function updateHashrateChart() {
+            try {
+                const response = await fetch('/api/swarm/hashrate-trend?minutes=120&buckets=60');
+                if (!response.ok) return;
+
+                const { labels, data } = await response.json();
+                if (!labels || !data) return;
+
+                const ctx = document.getElementById('hashrateChart').getContext('2d');
+
+                if (hashrateChart) {
+                    // Update existing chart
+                    hashrateChart.data.labels = labels;
+                    hashrateChart.data.datasets[0].data = data;
+                    hashrateChart.update('none'); // No animation for smoother updates
+                } else {
+                    // Create new chart
+                    hashrateChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: labels,
+                            datasets: [{
+                                label: 'Swarm Hashrate (GH/s)',
+                                data: data,
+                                borderColor: '#58a6ff',
+                                backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                                fill: true,
+                                tension: 0.3,
+                                pointRadius: 0,
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: { display: false }
+                            },
+                            scales: {
+                                x: {
+                                    grid: { color: 'rgba(255,255,255,0.1)' },
+                                    ticks: { color: '#8b949e', maxTicksLimit: 8 }
+                                },
+                                y: {
+                                    grid: { color: 'rgba(255,255,255,0.1)' },
+                                    ticks: { color: '#8b949e' },
+                                    beginAtZero: false
+                                }
+                            },
+                            interaction: {
+                                intersect: false,
+                                mode: 'index'
+                            }
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error('Chart error:', error);
+            }
         }
 
         function createMinerCard(miner) {
@@ -440,7 +511,13 @@
             refreshBtn.textContent = 'Refreshing...';
 
             try {
-                const response = await fetch('/swarm');
+                // 5 second timeout to prevent hanging
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 5000);
+
+                const response = await fetch('/swarm', { signal: controller.signal });
+                clearTimeout(timeout);
+
                 if (!response.ok) throw new Error('API error');
 
                 const data = await response.json();
@@ -482,17 +559,22 @@
 
         // Initial fetch
         fetchData();
+        updateHashrateChart();
 
-        // Auto-refresh
+        // Auto-refresh (stats every 10s, chart every 30s)
         refreshTimer = setInterval(fetchData, REFRESH_INTERVAL);
+        let chartTimer = setInterval(updateHashrateChart, 30000);
 
         // Pause refresh when tab is not visible
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 clearInterval(refreshTimer);
+                clearInterval(chartTimer);
             } else {
                 fetchData();
+                updateHashrateChart();
                 refreshTimer = setInterval(fetchData, REFRESH_INTERVAL);
+                chartTimer = setInterval(updateHashrateChart, 30000);
             }
         });
     </script>
