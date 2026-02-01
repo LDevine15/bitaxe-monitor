@@ -379,8 +379,19 @@ class Database:
         """
         cursor = self.conn.cursor()
 
-        # Calculate time range
-        now = datetime.now()
+        # Get the most recent timestamp for this device to use as reference
+        # This handles cases where data collection may be delayed
+        cursor.execute(
+            "SELECT MAX(timestamp) FROM performance_metrics WHERE device_id = ?",
+            (device_id,)
+        )
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            now = datetime.fromisoformat(max_row[0])
+        else:
+            now = datetime.now()
+        
         cutoff = now - timedelta(minutes=minutes)
 
         # Get bucket averages
@@ -420,11 +431,22 @@ class Database:
         """
         cursor = self.conn.cursor()
 
-        # Calculate time range
-        cutoff = datetime.now() - timedelta(minutes=minutes)
+        # Get the most recent timestamp for this device to use as reference
+        # This handles cases where data collection may be delayed
+        cursor.execute(
+            "SELECT MAX(timestamp) FROM performance_metrics WHERE device_id = ?",
+            (device_id,)
+        )
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            now = datetime.fromisoformat(max_row[0])
+        else:
+            now = datetime.now()
+        
+        cutoff = now - timedelta(minutes=minutes)
 
         # Get bucket averages (filter out sensor errors < 0)
-        now = datetime.now()
         cursor.execute("""
             WITH bucket_data AS (
                 SELECT
@@ -470,7 +492,18 @@ class Database:
             List of dicts with 'timestamp', 'device_id', 'frequency', 'core_voltage'
         """
         cursor = self.conn.cursor()
-        lookback = datetime.now() - timedelta(minutes=minutes)
+        
+        # Get the most recent timestamp to use as reference
+        # This handles cases where data collection may be delayed
+        cursor.execute("SELECT MAX(timestamp) FROM performance_metrics")
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            reference_time = datetime.fromisoformat(max_row[0])
+        else:
+            reference_time = datetime.now()
+        
+        lookback = reference_time - timedelta(minutes=minutes)
 
         # For each device, find where config_id changes
         config_changes = []

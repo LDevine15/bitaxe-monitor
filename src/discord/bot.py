@@ -538,7 +538,18 @@ class BitaxeBot(commands.Bot):
         """
         from datetime import datetime, timedelta
 
-        lookback = datetime.now() - timedelta(hours=hours)
+        # Get the most recent timestamp from the database to use as reference
+        # This handles cases where data collection may be delayed or database is not live
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT MAX(timestamp) FROM performance_metrics")
+        max_row = cursor.fetchone()
+        
+        if not max_row or not max_row[0]:
+            return (0, 0)
+        
+        # Parse the max timestamp and calculate lookback from it
+        max_timestamp = datetime.fromisoformat(max_row[0])
+        lookback = max_timestamp - timedelta(hours=hours)
 
         total_hashrate = 0
         total_power = 0
@@ -547,7 +558,6 @@ class BitaxeBot(commands.Bot):
         for device in self.devices:
             device_id = device['name']
 
-            cursor = self.db.conn.cursor()
             cursor.execute("""
                 SELECT AVG(hashrate) as avg_hr, AVG(power) as avg_pwr
                 FROM performance_metrics
@@ -631,6 +641,8 @@ class BitaxeBot(commands.Bot):
         Returns:
             Formatted status string with ANSI color codes (under 2000 chars)
         """
+        from datetime import datetime, timedelta
+        
         lines = []
         lines.append("```ansi")  # Start ANSI code block
 
@@ -658,6 +670,19 @@ class BitaxeBot(commands.Bot):
         lines.append(f"\x1b[0;36m{avg_hashrate/1000:.2f} Th/s\x1b[0m | \x1b[0;32m{active_count}/{len(self.devices)}\x1b[0m | \x1b[0;36m{avg_efficiency:.1f} J/TH\x1b[0m | \x1b[0;36m{avg_power:.1f}W\x1b[0m")
         lines.append("")
 
+        # Get the most recent timestamp from the database to use as reference
+        # This handles cases where data collection may be delayed or database is not live
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT MAX(timestamp) FROM performance_metrics")
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            max_timestamp = datetime.fromisoformat(max_row[0])
+            lookback = max_timestamp - timedelta(hours=hours)
+        else:
+            # Fallback to datetime.now() if no data exists
+            lookback = datetime.now() - timedelta(hours=hours)
+
         for device in self.devices:
             device_id = device['name']
 
@@ -668,11 +693,7 @@ class BitaxeBot(commands.Bot):
 
             latest = data['latest']
 
-            # Get averages for the specified timespan
-            from datetime import datetime, timedelta
-            lookback = datetime.now() - timedelta(hours=hours)
-
-            cursor = self.db.conn.cursor()
+            # Get averages for the specified timespan (lookback calculated above)
             cursor.execute("""
                 SELECT AVG(hashrate) as avg_hr, AVG(efficiency_jth) as avg_eff
                 FROM performance_metrics
@@ -1025,10 +1046,21 @@ class BitaxeBot(commands.Bot):
             uptime_hours = latest['uptime'] / 3600
 
             # Calculate 1h average for comparison (run in executor)
+            # Use max timestamp as reference to handle stale/delayed data
             def get_1h_avg():
                 from datetime import datetime, timedelta
-                lookback = datetime.now() - timedelta(hours=1)
                 cursor = self.db.conn.cursor()
+                
+                # Get max timestamp to use as reference point
+                cursor.execute("SELECT MAX(timestamp) FROM performance_metrics WHERE device_id = ?", (name,))
+                max_row = cursor.fetchone()
+                
+                if max_row and max_row[0]:
+                    max_timestamp = datetime.fromisoformat(max_row[0])
+                    lookback = max_timestamp - timedelta(hours=1)
+                else:
+                    lookback = datetime.now() - timedelta(hours=1)
+                
                 cursor.execute("""
                     SELECT AVG(hashrate) as avg_hr, AVG(efficiency_jth) as avg_eff
                     FROM performance_metrics

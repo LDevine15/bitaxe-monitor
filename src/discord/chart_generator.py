@@ -204,8 +204,17 @@ class ChartGenerator:
             # Only add if we have data from at least one device
             swarm_trend.append(bucket_sum if valid_count > 0 else None)
 
-        # Generate timestamps
-        now = datetime.now()
+        # Get the most recent timestamp to use as reference for x-axis labels
+        # This ensures chart labels match the actual data period
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT MAX(timestamp) FROM performance_metrics")
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            now = datetime.fromisoformat(max_row[0])
+        else:
+            now = datetime.now()
+        
         timestamps = [now - timedelta(minutes=minutes * (buckets - i - 1) / buckets) for i in range(buckets)]
 
         # Calculate consistent moving averages for all timeframes
@@ -356,8 +365,17 @@ class ChartGenerator:
         # Cap at 576 buckets (48 hours at 5-min intervals) to keep chart reasonable
         buckets = min(576, minutes // 5)
 
-        # Generate timestamps
-        now = datetime.now()
+        # Get the most recent timestamp to use as reference for x-axis labels
+        # This ensures chart labels match the actual data period
+        cursor = self.db.conn.cursor()
+        cursor.execute("SELECT MAX(timestamp) FROM performance_metrics")
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            now = datetime.fromisoformat(max_row[0])
+        else:
+            now = datetime.now()
+        
         timestamps = [now - timedelta(minutes=minutes * (buckets - i - 1) / buckets) for i in range(buckets)]
 
         # Create figure with two subplots (hashrate on top, temperature below)
@@ -545,8 +563,20 @@ class ChartGenerator:
         hashrate_trend = self.db.get_bucketed_hashrate_trend(device_id, minutes, buckets)
         temp_trend = self.db.get_bucketed_temp_trend(device_id, minutes, buckets)
 
-        # Generate timestamps
-        now = datetime.now()
+        # Get the most recent timestamp for this device to use as reference for x-axis labels
+        # This ensures chart labels match the actual data period
+        cursor = self.db.conn.cursor()
+        cursor.execute(
+            "SELECT MAX(timestamp) FROM performance_metrics WHERE device_id = ?",
+            (device_id,)
+        )
+        max_row = cursor.fetchone()
+        
+        if max_row and max_row[0]:
+            now = datetime.fromisoformat(max_row[0])
+        else:
+            now = datetime.now()
+        
         timestamps = [now - timedelta(minutes=minutes * (buckets - i - 1) / buckets) for i in range(buckets)]
 
         # Create figure with dual y-axis
