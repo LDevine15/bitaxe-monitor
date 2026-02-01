@@ -70,6 +70,7 @@ def get_swarm_data():
                 # Miner is offline
                 miners.append({
                     'name': device_id,
+                    'group': device.get('group', 'default'),
                     'online': False,
                     'hashrate': 0,
                     'power': 0,
@@ -77,6 +78,9 @@ def get_swarm_data():
                     'asic_temp': 0,
                     'vreg_temp': 0,
                     'frequency': 0,
+                    'core_voltage': 0,
+                    'fan_speed': 0,
+                    'fan_rpm': 0,
                     'uptime_hours': 0
                 })
                 continue
@@ -91,6 +95,7 @@ def get_swarm_data():
             # Individual miner data
             miners.append({
                 'name': device_id,
+                'group': device.get('group', 'default'),
                 'online': True,
                 'hashrate': round(latest['hashrate'], 2),  # GH/s
                 'power': round(latest['power'], 1),  # W
@@ -98,6 +103,9 @@ def get_swarm_data():
                 'asic_temp': round(latest['asic_temp'], 1),  # °C
                 'vreg_temp': round(latest['vreg_temp'], 1),  # °C
                 'frequency': int(latest['frequency']),  # MHz
+                'core_voltage': int(latest['core_voltage']),  # mV
+                'fan_speed': int(latest['fan_speed']),  # %
+                'fan_rpm': int(latest['fan_rpm']),  # RPM
                 'uptime_hours': round(latest['uptime'] / 3600, 1)  # hours
             })
 
@@ -408,10 +416,13 @@ def get_summary():
 if __name__ == '__main__':
     import signal
     import sys
+    import atexit
 
-    def signal_handler(sig, frame):
+    # Register cleanup at exit (safer than signal handler)
+    atexit.register(lambda: db.close())
+
+    def signal_handler(_sig, _frame):
         logger.info("Shutting down API server...")
-        db.close()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)

@@ -380,16 +380,24 @@
                         <span class="miner-stat-value">${formatHashrate(miner.hashrate)}</span>
                     </div>
                     <div class="miner-stat">
-                        <span class="miner-stat-label">Frequency</span>
-                        <span class="miner-stat-value">${miner.frequency} MHz</span>
-                    </div>
-                    <div class="miner-stat">
                         <span class="miner-stat-label">Efficiency</span>
                         <span class="miner-stat-value">${miner.efficiency} J/TH</span>
                     </div>
                     <div class="miner-stat">
+                        <span class="miner-stat-label">Frequency</span>
+                        <span class="miner-stat-value">${miner.frequency} MHz</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Voltage</span>
+                        <span class="miner-stat-value">${miner.core_voltage} mV</span>
+                    </div>
+                    <div class="miner-stat">
                         <span class="miner-stat-label">Power</span>
                         <span class="miner-stat-value">${miner.power}W</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Fan</span>
+                        <span class="miner-stat-value">${miner.fan_speed}% (${miner.fan_rpm} RPM)</span>
                     </div>
                     <div class="miner-stat">
                         <span class="miner-stat-label">ASIC Temp</span>
