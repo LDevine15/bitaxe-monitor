@@ -3,8 +3,9 @@
 
 import logging
 from datetime import datetime
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
+import requests
 from src.database import Database
 from src.analyzer import Analyzer
 
@@ -12,6 +13,17 @@ from src.analyzer import Analyzer
 import yaml
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
+
+# Control safety limits (from config or defaults)
+control_config = config.get('discord', {}).get('control', {})
+CONTROL_LIMITS = {
+    'min_frequency': control_config.get('min_frequency', 400),
+    'max_frequency': control_config.get('max_frequency', 650),
+    'min_voltage': control_config.get('min_voltage', 1000),
+    'max_voltage': control_config.get('max_voltage', 1300),
+    'min_fan_speed': control_config.get('min_fan_speed', 0),
+    'max_fan_speed': control_config.get('max_fan_speed', 100),
+}
 
 # Initialize Flask app with static folder
 app = Flask(__name__, static_folder='static')
@@ -489,6 +501,164 @@ def get_summary():
         return jsonify(summary)
     except Exception as e:
         logger.error(f"Error getting summary: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# Device Control Endpoints
+# =============================================================================
+
+def get_device_ip(device_id: str) -> str | None:
+    """Get IP address for a device by its name."""
+    for device in devices:
+        if device['name'] == device_id:
+            return device.get('ip')
+    return None
+
+
+@app.route('/api/control/limits', methods=['GET'])
+def get_control_limits():
+    """Get safety limits for control sliders."""
+    return jsonify(CONTROL_LIMITS)
+
+
+@app.route('/api/control/<device_id>/frequency', methods=['POST'])
+def set_device_frequency(device_id):
+    """Set device frequency (MHz)."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    data = request.get_json()
+    frequency = data.get('frequency')
+
+    if frequency is None:
+        return jsonify({'error': 'frequency is required'}), 400
+
+    frequency = int(frequency)
+    if not CONTROL_LIMITS['min_frequency'] <= frequency <= CONTROL_LIMITS['max_frequency']:
+        return jsonify({
+            'error': f"Frequency must be between {CONTROL_LIMITS['min_frequency']}-{CONTROL_LIMITS['max_frequency']} MHz"
+        }), 400
+
+    try:
+        response = requests.patch(
+            f"http://{ip}/api/system",
+            json={'frequency': frequency},
+            timeout=5
+        )
+        response.raise_for_status()
+        logger.info(f"Set {device_id} frequency to {frequency} MHz")
+        return jsonify({'success': True, 'frequency': frequency})
+    except requests.RequestException as e:
+        logger.error(f"Failed to set frequency on {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/control/<device_id>/voltage', methods=['POST'])
+def set_device_voltage(device_id):
+    """Set device core voltage (mV)."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    data = request.get_json()
+    voltage = data.get('voltage')
+
+    if voltage is None:
+        return jsonify({'error': 'voltage is required'}), 400
+
+    voltage = int(voltage)
+    if not CONTROL_LIMITS['min_voltage'] <= voltage <= CONTROL_LIMITS['max_voltage']:
+        return jsonify({
+            'error': f"Voltage must be between {CONTROL_LIMITS['min_voltage']}-{CONTROL_LIMITS['max_voltage']} mV"
+        }), 400
+
+    try:
+        response = requests.patch(
+            f"http://{ip}/api/system",
+            json={'coreVoltage': voltage},
+            timeout=5
+        )
+        response.raise_for_status()
+        logger.info(f"Set {device_id} voltage to {voltage} mV")
+        return jsonify({'success': True, 'voltage': voltage})
+    except requests.RequestException as e:
+        logger.error(f"Failed to set voltage on {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/control/<device_id>/fan', methods=['POST'])
+def set_device_fan(device_id):
+    """Set device fan speed (%) - disables auto mode."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    data = request.get_json()
+    fan_speed = data.get('fan_speed')
+
+    if fan_speed is None:
+        return jsonify({'error': 'fan_speed is required'}), 400
+
+    fan_speed = int(fan_speed)
+    if not CONTROL_LIMITS['min_fan_speed'] <= fan_speed <= CONTROL_LIMITS['max_fan_speed']:
+        return jsonify({
+            'error': f"Fan speed must be between {CONTROL_LIMITS['min_fan_speed']}-{CONTROL_LIMITS['max_fan_speed']}%"
+        }), 400
+
+    try:
+        response = requests.patch(
+            f"http://{ip}/api/system",
+            json={'autofanspeed': 0, 'manualFanSpeed': fan_speed},
+            timeout=5
+        )
+        response.raise_for_status()
+        logger.info(f"Set {device_id} fan speed to {fan_speed}%")
+        return jsonify({'success': True, 'fan_speed': fan_speed})
+    except requests.RequestException as e:
+        logger.error(f"Failed to set fan on {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/control/<device_id>/autofan', methods=['POST'])
+def enable_device_autofan(device_id):
+    """Enable auto fan mode."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    try:
+        response = requests.patch(
+            f"http://{ip}/api/system",
+            json={'autofanspeed': 1},
+            timeout=5
+        )
+        response.raise_for_status()
+        logger.info(f"Enabled auto fan on {device_id}")
+        return jsonify({'success': True})
+    except requests.RequestException as e:
+        logger.error(f"Failed to enable auto fan on {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/control/<device_id>/restart', methods=['POST'])
+def restart_device(device_id):
+    """Restart the device."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    try:
+        response = requests.post(
+            f"http://{ip}/api/system/restart",
+            timeout=5
+        )
+        response.raise_for_status()
+        logger.warning(f"Restarted {device_id}")
+        return jsonify({'success': True})
+    except requests.RequestException as e:
+        logger.error(f"Failed to restart {device_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
 

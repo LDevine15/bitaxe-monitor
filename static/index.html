@@ -267,6 +267,220 @@
             color: var(--text-secondary);
         }
 
+        /* Control Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            width: 90%;
+            max-width: 400px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .control-value {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        .control-slider {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--bg-card);
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .control-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            cursor: pointer;
+            border: 2px solid var(--bg-secondary);
+        }
+
+        .control-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            cursor: pointer;
+            border: 2px solid var(--bg-secondary);
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .control-btn {
+            flex: 1;
+            padding: 10px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .control-btn:hover {
+            background: var(--border);
+        }
+
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .control-btn.primary {
+            background: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+            color: var(--bg-primary);
+        }
+
+        .control-btn.primary:hover {
+            background: #4a9aef;
+        }
+
+        .control-btn.danger {
+            background: transparent;
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .control-btn.danger:hover {
+            background: var(--accent-red);
+            color: var(--bg-primary);
+        }
+
+        .fan-toggle {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .fan-toggle-btn {
+            flex: 1;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .fan-toggle-btn.active {
+            background: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+            color: var(--bg-primary);
+        }
+
+        .status-message {
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .status-message.success {
+            display: block;
+            background: rgba(63, 185, 80, 0.15);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        .status-message.error {
+            display: block;
+            background: rgba(248, 81, 73, 0.15);
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .current-settings {
+            background: var(--bg-card);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 13px;
+        }
+
+        .current-settings-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+
+        .current-settings-label {
+            color: var(--text-secondary);
+        }
+
         @media (max-width: 600px) {
             .swarm-stats {
                 grid-template-columns: repeat(2, 1fr);
@@ -322,6 +536,77 @@
 
         <div class="miner-grid" id="minerGrid">
             <div class="loading">Loading miners...</div>
+        </div>
+    </div>
+
+    <!-- Control Modal -->
+    <div class="modal-overlay" id="controlModal">
+        <div class="modal">
+            <div class="modal-header">
+                <span class="modal-title" id="modalTitle">Miner Settings</span>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+
+            <div class="status-message" id="statusMessage"></div>
+
+            <div class="current-settings" id="currentSettings">
+                <div class="current-settings-row">
+                    <span class="current-settings-label">Current Frequency</span>
+                    <span id="currentFreq">-- MHz</span>
+                </div>
+                <div class="current-settings-row">
+                    <span class="current-settings-label">Current Voltage</span>
+                    <span id="currentVoltage">-- mV</span>
+                </div>
+                <div class="current-settings-row">
+                    <span class="current-settings-label">Current Fan</span>
+                    <span id="currentFan">--%</span>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="control-label">
+                    <span>Frequency</span>
+                    <span class="control-value" id="freqValue">575 MHz</span>
+                </div>
+                <input type="range" class="control-slider" id="freqSlider"
+                       min="400" max="650" step="25" value="575">
+                <div class="control-buttons">
+                    <button class="control-btn primary" onclick="applyFrequency()">Apply</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="control-label">
+                    <span>Core Voltage</span>
+                    <span class="control-value" id="voltageValue">1200 mV</span>
+                </div>
+                <input type="range" class="control-slider" id="voltageSlider"
+                       min="1000" max="1300" step="10" value="1200">
+                <div class="control-buttons">
+                    <button class="control-btn primary" onclick="applyVoltage()">Apply</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <div class="control-label">
+                    <span>Fan Speed</span>
+                    <span class="control-value" id="fanValue">Auto</span>
+                </div>
+                <div class="fan-toggle">
+                    <button class="fan-toggle-btn active" id="fanAutoBtn" onclick="setFanMode('auto')">Auto</button>
+                    <button class="fan-toggle-btn" id="fanManualBtn" onclick="setFanMode('manual')">Manual</button>
+                </div>
+                <input type="range" class="control-slider" id="fanSlider"
+                       min="0" max="100" step="5" value="100" disabled>
+                <div class="control-buttons">
+                    <button class="control-btn primary" id="applyFanBtn" onclick="applyFan()" disabled>Apply</button>
+                </div>
+            </div>
+
+            <div class="control-group" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border);">
+                <button class="control-btn danger" style="width: 100%;" onclick="restartMiner()">Restart Miner</button>
+            </div>
         </div>
     </div>
 
@@ -449,6 +734,10 @@
         function createMinerCard(miner) {
             const card = document.createElement('div');
             card.className = `miner-card ${miner.online ? '' : 'offline'}`;
+            if (miner.online) {
+                card.style.cursor = 'pointer';
+                card.onclick = () => openControlModal(miner);
+            }
 
             if (!miner.online) {
                 card.innerHTML = `
@@ -473,7 +762,10 @@
             card.innerHTML = `
                 <div class="miner-header">
                     <span class="miner-name">${miner.name}</span>
-                    <span class="miner-status">Online</span>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span class="miner-status">Online</span>
+                        <span style="color: var(--text-secondary); font-size: 12px;" title="Click to configure">&#9881;</span>
+                    </div>
                 </div>
                 <div class="miner-stats">
                     <div class="miner-stat">
@@ -604,6 +896,215 @@
                 chartTimer = setInterval(updateHashrateChart, 30000);
             }
         });
+
+        // =================================================================
+        // Control Modal
+        // =================================================================
+        let selectedMiner = null;
+        let controlLimits = {
+            min_frequency: 400, max_frequency: 650,
+            min_voltage: 1000, max_voltage: 1300,
+            min_fan_speed: 0, max_fan_speed: 100
+        };
+        let fanMode = 'auto';
+
+        // Fetch control limits on load
+        fetch('/api/control/limits')
+            .then(r => r.json())
+            .then(limits => {
+                controlLimits = limits;
+                document.getElementById('freqSlider').min = limits.min_frequency;
+                document.getElementById('freqSlider').max = limits.max_frequency;
+                document.getElementById('voltageSlider').min = limits.min_voltage;
+                document.getElementById('voltageSlider').max = limits.max_voltage;
+                document.getElementById('fanSlider').min = limits.min_fan_speed;
+                document.getElementById('fanSlider').max = limits.max_fan_speed;
+            })
+            .catch(() => {});
+
+        // Slider value displays
+        document.getElementById('freqSlider').addEventListener('input', function() {
+            document.getElementById('freqValue').textContent = this.value + ' MHz';
+        });
+        document.getElementById('voltageSlider').addEventListener('input', function() {
+            document.getElementById('voltageValue').textContent = this.value + ' mV';
+        });
+        document.getElementById('fanSlider').addEventListener('input', function() {
+            document.getElementById('fanValue').textContent = this.value + '%';
+        });
+
+        function openControlModal(miner) {
+            selectedMiner = miner;
+            document.getElementById('modalTitle').textContent = miner.name + ' Settings';
+            document.getElementById('currentFreq').textContent = miner.frequency + ' MHz';
+            document.getElementById('currentVoltage').textContent = miner.core_voltage + ' mV';
+            document.getElementById('currentFan').textContent = miner.fan_speed + '%';
+
+            // Set sliders to current values
+            document.getElementById('freqSlider').value = miner.frequency;
+            document.getElementById('freqValue').textContent = miner.frequency + ' MHz';
+            document.getElementById('voltageSlider').value = miner.core_voltage;
+            document.getElementById('voltageValue').textContent = miner.core_voltage + ' mV';
+            document.getElementById('fanSlider').value = miner.fan_speed;
+
+            // Reset fan mode to auto
+            setFanMode('auto');
+
+            // Clear any previous status
+            document.getElementById('statusMessage').className = 'status-message';
+
+            document.getElementById('controlModal').classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('controlModal').classList.remove('active');
+            selectedMiner = null;
+        }
+
+        // Close modal on overlay click
+        document.getElementById('controlModal').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeModal();
+        });
+
+        function setFanMode(mode) {
+            fanMode = mode;
+            const autoBtn = document.getElementById('fanAutoBtn');
+            const manualBtn = document.getElementById('fanManualBtn');
+            const slider = document.getElementById('fanSlider');
+            const applyBtn = document.getElementById('applyFanBtn');
+            const valueDisplay = document.getElementById('fanValue');
+
+            if (mode === 'auto') {
+                autoBtn.classList.add('active');
+                manualBtn.classList.remove('active');
+                slider.disabled = true;
+                applyBtn.disabled = true;
+                valueDisplay.textContent = 'Auto';
+            } else {
+                autoBtn.classList.remove('active');
+                manualBtn.classList.add('active');
+                slider.disabled = false;
+                applyBtn.disabled = false;
+                valueDisplay.textContent = slider.value + '%';
+            }
+        }
+
+        function showStatus(message, isError = false) {
+            const el = document.getElementById('statusMessage');
+            el.textContent = message;
+            el.className = 'status-message ' + (isError ? 'error' : 'success');
+            setTimeout(() => {
+                el.className = 'status-message';
+            }, 3000);
+        }
+
+        async function applyFrequency() {
+            if (!selectedMiner) return;
+            const frequency = parseInt(document.getElementById('freqSlider').value);
+
+            try {
+                const response = await fetch(`/api/control/${selectedMiner.name}/frequency`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frequency })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showStatus(`Frequency set to ${frequency} MHz`);
+                    document.getElementById('currentFreq').textContent = frequency + ' MHz';
+                } else {
+                    showStatus(data.error || 'Failed to set frequency', true);
+                }
+            } catch (e) {
+                showStatus('Connection error', true);
+            }
+        }
+
+        async function applyVoltage() {
+            if (!selectedMiner) return;
+            const voltage = parseInt(document.getElementById('voltageSlider').value);
+
+            try {
+                const response = await fetch(`/api/control/${selectedMiner.name}/voltage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ voltage })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showStatus(`Voltage set to ${voltage} mV`);
+                    document.getElementById('currentVoltage').textContent = voltage + ' mV';
+                } else {
+                    showStatus(data.error || 'Failed to set voltage', true);
+                }
+            } catch (e) {
+                showStatus('Connection error', true);
+            }
+        }
+
+        async function applyFan() {
+            if (!selectedMiner) return;
+
+            if (fanMode === 'auto') {
+                try {
+                    const response = await fetch(`/api/control/${selectedMiner.name}/autofan`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        showStatus('Auto fan enabled');
+                    } else {
+                        showStatus(data.error || 'Failed to enable auto fan', true);
+                    }
+                } catch (e) {
+                    showStatus('Connection error', true);
+                }
+            } else {
+                const fan_speed = parseInt(document.getElementById('fanSlider').value);
+                try {
+                    const response = await fetch(`/api/control/${selectedMiner.name}/fan`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fan_speed })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        showStatus(`Fan speed set to ${fan_speed}%`);
+                        document.getElementById('currentFan').textContent = fan_speed + '%';
+                    } else {
+                        showStatus(data.error || 'Failed to set fan speed', true);
+                    }
+                } catch (e) {
+                    showStatus('Connection error', true);
+                }
+            }
+        }
+
+        async function restartMiner() {
+            if (!selectedMiner) return;
+            if (!confirm(`Are you sure you want to restart ${selectedMiner.name}?`)) return;
+
+            try {
+                const response = await fetch(`/api/control/${selectedMiner.name}/restart`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showStatus('Restart command sent');
+                    setTimeout(closeModal, 1500);
+                } else {
+                    showStatus(data.error || 'Failed to restart', true);
+                }
+            } catch (e) {
+                showStatus('Connection error', true);
+            }
+        }
     </script>
 </body>
 </html>
