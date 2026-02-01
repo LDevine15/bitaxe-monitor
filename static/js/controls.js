@@ -4,8 +4,8 @@
 
 let selectedMiner = null;
 let controlLimits = {
-    min_frequency: 400, max_frequency: 650,
-    min_voltage: 1000, max_voltage: 1300,
+    min_frequency: 400, max_frequency: 1000,
+    min_voltage: 1000, max_voltage: 1400,
     min_fan_speed: 0, max_fan_speed: 100
 };
 let fanMode = 'auto';
