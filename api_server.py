@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Flask API server for ESP32 display to fetch swarm data."""
+"""Flask API server for ESP32 display and web dashboard."""
 
 import logging
 from datetime import datetime
-from flask import Flask, jsonify
+from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 from src.database import Database
 from src.analyzer import Analyzer
@@ -13,9 +13,19 @@ import yaml
 with open('config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
-# Initialize Flask app
-app = Flask(__name__)
+# Initialize Flask app with static folder
+app = Flask(__name__, static_folder='static')
 CORS(app)  # Allow cross-origin requests from ESP32
+
+
+# =============================================================================
+# Web Dashboard
+# =============================================================================
+
+@app.route('/')
+def serve_dashboard():
+    """Serve the web dashboard."""
+    return send_from_directory('static', 'index.html')
 
 # Initialize database and analyzer
 db_path = config.get('logging', {}).get('database_path', './data/metrics.db')
@@ -409,9 +419,12 @@ if __name__ == '__main__':
 
     logger.info(f"Starting API server for {len(devices)} device(s)")
     logger.info(f"Database: {db_path}")
-    logger.info("API endpoints:")
-    logger.info("  GET /swarm - Swarm status for ESP32")
-    logger.info("  GET /health - Health check")
+    logger.info("Endpoints:")
+    logger.info("  GET /        - Web Dashboard")
+    logger.info("  GET /swarm   - Swarm status (JSON)")
+    logger.info("  GET /health  - Health check")
+    logger.info("")
+    logger.info("Web Dashboard: http://localhost:5001")
 
     # Run on all interfaces so ESP32 can connect
     # Using port 5001 (port 5000 conflicts with macOS AirPlay Receiver)

@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitaxe Monitor</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-card: #21262d;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-cyan: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-red: #f85149;
+            --accent-orange: #db6d28;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.stale {
+            background: var(--accent-yellow);
+        }
+
+        .status-indicator.offline {
+            background: var(--accent-red);
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .last-update {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        /* Swarm Summary */
+        .swarm-summary {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .swarm-summary h2 {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .swarm-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 24px;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: var(--accent-cyan);
+        }
+
+        .stat-value.hashrate { color: var(--accent-cyan); }
+        .stat-value.power { color: var(--accent-orange); }
+        .stat-value.efficiency { color: var(--accent-green); }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            text-transform: uppercase;
+        }
+
+        /* Miner Grid */
+        .miner-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+        }
+
+        .miner-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            transition: border-color 0.2s;
+        }
+
+        .miner-card:hover {
+            border-color: var(--accent-cyan);
+        }
+
+        .miner-card.offline {
+            opacity: 0.6;
+            border-color: var(--accent-red);
+        }
+
+        .miner-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .miner-name {
+            font-weight: 600;
+            font-size: 16px;
+        }
+
+        .miner-status {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+
+        .miner-status.offline {
+            background: var(--accent-red);
+        }
+
+        .miner-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .miner-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+        }
+
+        .miner-stat-label {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .miner-stat-value {
+            font-weight: 500;
+            font-size: 13px;
+        }
+
+        .miner-stat-value.warn { color: var(--accent-yellow); }
+        .miner-stat-value.critical { color: var(--accent-red); }
+        .miner-stat-value.good { color: var(--accent-green); }
+
+        /* Temperature bar */
+        .temp-bar {
+            grid-column: span 2;
+            margin-top: 8px;
+        }
+
+        .temp-bar-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .temp-bar-track {
+            height: 6px;
+            background: var(--bg-secondary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .temp-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+
+        /* Refresh button */
+        .refresh-btn {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: var(--border);
+        }
+
+        .refresh-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Error state */
+        .error-message {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            color: var(--accent-red);
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 600px) {
+            .swarm-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .miner-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>
+                <span class="status-indicator" id="statusIndicator"></span>
+                Bitaxe Monitor
+            </h1>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <span class="last-update" id="lastUpdate">Loading...</span>
+                <button class="refresh-btn" onclick="fetchData()" id="refreshBtn">Refresh</button>
+            </div>
+        </header>
+
+        <div class="swarm-summary">
+            <h2>Swarm Overview</h2>
+            <div class="swarm-stats" id="swarmStats">
+                <div class="stat-item">
+                    <div class="stat-value hashrate" id="totalHashrate">--</div>
+                    <div class="stat-label">Total Hashrate</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="activeMiners">--</div>
+                    <div class="stat-label">Active Miners</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value efficiency" id="avgEfficiency">--</div>
+                    <div class="stat-label">Avg Efficiency</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value power" id="totalPower">--</div>
+                    <div class="stat-label">Total Power</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="miner-grid" id="minerGrid">
+            <div class="loading">Loading miners...</div>
+        </div>
+    </div>
+
+    <script>
+        const REFRESH_INTERVAL = 10000; // 10 seconds
+        let refreshTimer;
+
+        function formatHashrate(ghps) {
+            if (ghps >= 1000) {
+                return (ghps / 1000).toFixed(2) + ' TH/s';
+            }
+            return ghps.toFixed(1) + ' GH/s';
+        }
+
+        function formatUptime(hours) {
+            if (hours >= 24) {
+                const days = Math.floor(hours / 24);
+                const remainingHours = Math.floor(hours % 24);
+                return `${days}d ${remainingHours}h`;
+            }
+            return hours.toFixed(1) + 'h';
+        }
+
+        function getTempClass(temp, warn = 65, critical = 70) {
+            if (temp >= critical) return 'critical';
+            if (temp >= warn) return 'warn';
+            return 'good';
+        }
+
+        function getTempBarColor(temp) {
+            if (temp >= 70) return 'var(--accent-red)';
+            if (temp >= 65) return 'var(--accent-yellow)';
+            return 'var(--accent-green)';
+        }
+
+        function createMinerCard(miner) {
+            const card = document.createElement('div');
+            card.className = `miner-card ${miner.online ? '' : 'offline'}`;
+
+            if (!miner.online) {
+                card.innerHTML = `
+                    <div class="miner-header">
+                        <span class="miner-name">${miner.name}</span>
+                        <span class="miner-status offline">Offline</span>
+                    </div>
+                    <div style="color: var(--text-secondary); text-align: center; padding: 20px;">
+                        No data available
+                    </div>
+                `;
+                return card;
+            }
+
+            const asicTempClass = getTempClass(miner.asic_temp);
+            const vregTempClass = getTempClass(miner.vreg_temp, 70, 80);
+            const tempPercent = Math.min((miner.asic_temp / 80) * 100, 100);
+
+            card.innerHTML = `
+                <div class="miner-header">
+                    <span class="miner-name">${miner.name}</span>
+                    <span class="miner-status">Online</span>
+                </div>
+                <div class="miner-stats">
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Hashrate</span>
+                        <span class="miner-stat-value">${formatHashrate(miner.hashrate)}</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Frequency</span>
+                        <span class="miner-stat-value">${miner.frequency} MHz</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Efficiency</span>
+                        <span class="miner-stat-value">${miner.efficiency} J/TH</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Power</span>
+                        <span class="miner-stat-value">${miner.power}W</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">ASIC Temp</span>
+                        <span class="miner-stat-value ${asicTempClass}">${miner.asic_temp}°C</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">VRM Temp</span>
+                        <span class="miner-stat-value ${vregTempClass}">${miner.vreg_temp}°C</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Uptime</span>
+                        <span class="miner-stat-value">${formatUptime(miner.uptime_hours)}</span>
+                    </div>
+                    <div class="temp-bar">
+                        <div class="temp-bar-label">
+                            <span>Temperature</span>
+                            <span>${miner.asic_temp}°C / 80°C</span>
+                        </div>
+                        <div class="temp-bar-track">
+                            <div class="temp-bar-fill" style="width: ${tempPercent}%; background: ${getTempBarColor(miner.asic_temp)}"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            return card;
+        }
+
+        async function fetchData() {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const statusIndicator = document.getElementById('statusIndicator');
+
+            refreshBtn.disabled = true;
+            refreshBtn.textContent = 'Refreshing...';
+
+            try {
+                const response = await fetch('/swarm');
+                if (!response.ok) throw new Error('API error');
+
+                const data = await response.json();
+
+                // Update swarm stats
+                document.getElementById('totalHashrate').textContent = formatHashrate(data.total_hashrate);
+                document.getElementById('activeMiners').textContent = `${data.active_count}/${data.total_count}`;
+                document.getElementById('avgEfficiency').textContent = `${data.avg_efficiency} J/TH`;
+                document.getElementById('totalPower').textContent = `${data.total_power}W`;
+
+                // Update miner grid
+                const grid = document.getElementById('minerGrid');
+                grid.innerHTML = '';
+
+                data.miners.forEach(miner => {
+                    grid.appendChild(createMinerCard(miner));
+                });
+
+                // Update status
+                statusIndicator.className = 'status-indicator';
+                document.getElementById('lastUpdate').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                document.getElementById('statusIndicator').className = 'status-indicator offline';
+                document.getElementById('lastUpdate').textContent = 'Connection error';
+
+                const grid = document.getElementById('minerGrid');
+                grid.innerHTML = `
+                    <div class="error-message" style="grid-column: 1 / -1;">
+                        Failed to connect to API server. Make sure api_server.py is running.
+                    </div>
+                `;
+            } finally {
+                refreshBtn.disabled = false;
+                refreshBtn.textContent = 'Refresh';
+            }
+        }
+
+        // Initial fetch
+        fetchData();
+
+        // Auto-refresh
+        refreshTimer = setInterval(fetchData, REFRESH_INTERVAL);
+
+        // Pause refresh when tab is not visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                clearInterval(refreshTimer);
+            } else {
+                fetchData();
+                refreshTimer = setInterval(fetchData, REFRESH_INTERVAL);
+            }
+        });
+    </script>
+</body>
+</html>
