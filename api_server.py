@@ -42,7 +42,9 @@ logger = logging.getLogger(__name__)
 
 @app.route('/swarm', methods=['GET'])
 def get_swarm_data():
-    """Get current swarm status for ESP32 display.
+    """Get current swarm status for ESP32 display and web dashboard.
+
+    Lightweight endpoint - only fetches latest metrics per device.
 
     Returns JSON with:
     - total_hashrate: Total swarm hashrate in GH/s
@@ -53,20 +55,20 @@ def get_swarm_data():
     - miners: Array of individual miner stats
     """
     try:
-        # Get summary data (same as Discord bot)
-        summary = analyzer.get_all_devices_summary()
-
         # Calculate swarm totals from current values
         total_hashrate = 0.0
         total_power = 0.0
         active_count = 0
         miners = []
+        latest_timestamp = None
 
         for device in devices:
             device_id = device['name']
-            data = summary.get(device_id)
 
-            if not data or not data['latest']:
+            # Direct lightweight query - just get latest metric
+            latest = db.get_latest_metric(device_id)
+
+            if not latest:
                 # Miner is offline
                 miners.append({
                     'name': device_id,
@@ -79,18 +81,30 @@ def get_swarm_data():
                     'vreg_temp': 0,
                     'frequency': 0,
                     'core_voltage': 0,
+                    'input_voltage': 0,
                     'fan_speed': 0,
                     'fan_rpm': 0,
                     'uptime_hours': 0
                 })
                 continue
 
-            latest = data['latest']
-
             # Add to totals
             total_hashrate += latest['hashrate']
             total_power += latest['power']
             active_count += 1
+
+            # Capture timestamp from first online miner (for ESP32)
+            if latest_timestamp is None and latest.get('timestamp'):
+                try:
+                    dt = datetime.fromisoformat(latest['timestamp'])
+                    latest_timestamp = str(int(dt.timestamp()))
+                except (ValueError, TypeError):
+                    pass
+
+            # Input voltage - convert from mV to V if needed
+            input_voltage = latest['voltage']
+            if input_voltage > 100:  # Stored in mV
+                input_voltage = input_voltage / 1000.0
 
             # Individual miner data
             miners.append({
@@ -104,6 +118,7 @@ def get_swarm_data():
                 'vreg_temp': round(latest['vreg_temp'], 1),  # °C
                 'frequency': int(latest['frequency']),  # MHz
                 'core_voltage': int(latest['core_voltage']),  # mV
+                'input_voltage': round(input_voltage, 2),  # V
                 'fan_speed': int(latest['fan_speed']),  # %
                 'fan_rpm': int(latest['fan_rpm']),  # RPM
                 'uptime_hours': round(latest['uptime'] / 3600, 1)  # hours
@@ -111,21 +126,6 @@ def get_swarm_data():
 
         # Calculate average efficiency
         avg_efficiency = (total_power / (total_hashrate / 1000.0)) if total_hashrate > 0 else 0
-
-        # Get timestamp from actual database data (reflects when data was collected)
-        # Convert ISO timestamp to Unix timestamp for easy ESP32 parsing
-        latest_timestamp = None
-        for device in devices:
-            device_id = device['name']
-            data = summary.get(device_id)
-            if data and data['latest'] and data['latest'].get('timestamp'):
-                try:
-                    # Parse ISO format: "2025-12-18 09:23:36.908064"
-                    dt = datetime.fromisoformat(data['latest']['timestamp'])
-                    latest_timestamp = str(int(dt.timestamp()))
-                    break
-                except (ValueError, TypeError):
-                    pass
 
         response = {
             'total_hashrate': round(total_hashrate, 2),  # GH/s

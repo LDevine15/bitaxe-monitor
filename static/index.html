@@ -369,6 +369,9 @@
             const vregTempClass = getTempClass(miner.vreg_temp, 70, 80);
             const tempPercent = Math.min((miner.asic_temp / 80) * 100, 100);
 
+            // Input voltage color (warn if < 4.9V, critical if < 4.8V)
+            const voltageClass = miner.input_voltage < 4.8 ? 'critical' : miner.input_voltage < 4.9 ? 'warn' : '';
+
             card.innerHTML = `
                 <div class="miner-header">
                     <span class="miner-name">${miner.name}</span>
@@ -388,7 +391,7 @@
                         <span class="miner-stat-value">${miner.frequency} MHz</span>
                     </div>
                     <div class="miner-stat">
-                        <span class="miner-stat-label">Voltage</span>
+                        <span class="miner-stat-label">Core Voltage</span>
                         <span class="miner-stat-value">${miner.core_voltage} mV</span>
                     </div>
                     <div class="miner-stat">
@@ -396,8 +399,8 @@
                         <span class="miner-stat-value">${miner.power}W</span>
                     </div>
                     <div class="miner-stat">
-                        <span class="miner-stat-label">Fan</span>
-                        <span class="miner-stat-value">${miner.fan_speed}% (${miner.fan_rpm} RPM)</span>
+                        <span class="miner-stat-label">Input Voltage</span>
+                        <span class="miner-stat-value ${voltageClass}">${miner.input_voltage}V</span>
                     </div>
                     <div class="miner-stat">
                         <span class="miner-stat-label">ASIC Temp</span>
@@ -410,6 +413,10 @@
                     <div class="miner-stat">
                         <span class="miner-stat-label">Uptime</span>
                         <span class="miner-stat-value">${formatUptime(miner.uptime_hours)}</span>
+                    </div>
+                    <div class="miner-stat">
+                        <span class="miner-stat-label">Fan</span>
+                        <span class="miner-stat-value">${miner.fan_speed}% (${miner.fan_rpm} RPM)</span>
                     </div>
                     <div class="temp-bar">
                         <div class="temp-bar-label">
