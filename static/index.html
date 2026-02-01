@@ -314,7 +314,7 @@
 
         <!-- Hashrate Chart -->
         <div class="swarm-summary" style="margin-bottom: 24px;">
-            <h2>Hashrate (2h)</h2>
+            <h2 id="chartTitle">Hashrate (2h)</h2>
             <div style="height: 200px;">
                 <canvas id="hashrateChart"></canvas>
             </div>
@@ -366,12 +366,26 @@
                 const { labels, data } = await response.json();
                 if (!labels || !data) return;
 
+                // Convert GH/s to TH/s
+                const dataTHs = data.map(v => v / 1000);
+
+                // Calculate 2h average
+                const validData = dataTHs.filter(v => v > 0);
+                const avg = validData.length > 0
+                    ? validData.reduce((a, b) => a + b, 0) / validData.length
+                    : 0;
+                const avgLine = dataTHs.map(() => avg);
+
+                // Update title with average
+                document.getElementById('chartTitle').textContent = `Hashrate (2h) — Avg: ${avg.toFixed(2)} TH/s`;
+
                 const ctx = document.getElementById('hashrateChart').getContext('2d');
 
                 if (hashrateChart) {
                     // Update existing chart
                     hashrateChart.data.labels = labels;
-                    hashrateChart.data.datasets[0].data = data;
+                    hashrateChart.data.datasets[0].data = dataTHs;
+                    hashrateChart.data.datasets[1].data = avgLine;
                     hashrateChart.update('none'); // No animation for smoother updates
                 } else {
                     // Create new chart
@@ -380,14 +394,22 @@
                         data: {
                             labels: labels,
                             datasets: [{
-                                label: 'Swarm Hashrate (GH/s)',
-                                data: data,
+                                label: 'Swarm Hashrate',
+                                data: dataTHs,
                                 borderColor: '#58a6ff',
                                 backgroundColor: 'rgba(88, 166, 255, 0.1)',
                                 fill: true,
                                 tension: 0.3,
                                 pointRadius: 0,
                                 borderWidth: 2
+                            }, {
+                                label: '2h Average',
+                                data: avgLine,
+                                borderColor: '#d29922',
+                                borderWidth: 2,
+                                borderDash: [6, 4],
+                                pointRadius: 0,
+                                fill: false
                             }]
                         },
                         options: {
@@ -403,7 +425,12 @@
                                 },
                                 y: {
                                     grid: { color: 'rgba(255,255,255,0.1)' },
-                                    ticks: { color: '#8b949e' },
+                                    ticks: {
+                                        color: '#8b949e',
+                                        callback: function(value) {
+                                            return value.toFixed(1) + ' TH/s';
+                                        }
+                                    },
                                     beginAtZero: false
                                 }
                             },
