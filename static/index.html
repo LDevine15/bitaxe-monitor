@@ -370,6 +370,39 @@
             border: 2px solid var(--bg-secondary);
         }
 
+        .control-input-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .control-input-row .control-slider {
+            flex: 1;
+        }
+
+        .control-number-input {
+            width: 80px;
+            padding: 6px 8px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .control-number-input:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+        }
+
+        .control-unit {
+            color: var(--text-secondary);
+            font-size: 13px;
+            min-width: 30px;
+        }
+
         .control-buttons {
             display: flex;
             gap: 8px;
@@ -567,10 +600,14 @@
             <div class="control-group">
                 <div class="control-label">
                     <span>Frequency</span>
-                    <span class="control-value" id="freqValue">575 MHz</span>
                 </div>
-                <input type="range" class="control-slider" id="freqSlider"
-                       min="400" max="650" step="25" value="575">
+                <div class="control-input-row">
+                    <input type="range" class="control-slider" id="freqSlider"
+                           min="400" max="650" step="25" value="575">
+                    <input type="number" class="control-number-input" id="freqInput"
+                           min="400" max="650" step="25" value="575">
+                    <span class="control-unit">MHz</span>
+                </div>
                 <div class="control-buttons">
                     <button class="control-btn primary" onclick="applyFrequency()">Apply</button>
                 </div>
@@ -579,10 +616,14 @@
             <div class="control-group">
                 <div class="control-label">
                     <span>Core Voltage</span>
-                    <span class="control-value" id="voltageValue">1200 mV</span>
                 </div>
-                <input type="range" class="control-slider" id="voltageSlider"
-                       min="1000" max="1300" step="10" value="1200">
+                <div class="control-input-row">
+                    <input type="range" class="control-slider" id="voltageSlider"
+                           min="1000" max="1300" step="10" value="1200">
+                    <input type="number" class="control-number-input" id="voltageInput"
+                           min="1000" max="1300" step="10" value="1200">
+                    <span class="control-unit">mV</span>
+                </div>
                 <div class="control-buttons">
                     <button class="control-btn primary" onclick="applyVoltage()">Apply</button>
                 </div>
@@ -591,16 +632,20 @@
             <div class="control-group">
                 <div class="control-label">
                     <span>Fan Speed</span>
-                    <span class="control-value" id="fanValue">Auto</span>
                 </div>
                 <div class="fan-toggle">
-                    <button class="fan-toggle-btn active" id="fanAutoBtn" onclick="setFanMode('auto')">Auto</button>
+                    <button class="fan-toggle-btn" id="fanAutoBtn" onclick="setFanMode('auto')">Auto</button>
                     <button class="fan-toggle-btn" id="fanManualBtn" onclick="setFanMode('manual')">Manual</button>
                 </div>
-                <input type="range" class="control-slider" id="fanSlider"
-                       min="0" max="100" step="5" value="100" disabled>
+                <div class="control-input-row">
+                    <input type="range" class="control-slider" id="fanSlider"
+                           min="0" max="100" step="5" value="100">
+                    <input type="number" class="control-number-input" id="fanInput"
+                           min="0" max="100" step="5" value="100">
+                    <span class="control-unit">%</span>
+                </div>
                 <div class="control-buttons">
-                    <button class="control-btn primary" id="applyFanBtn" onclick="applyFan()" disabled>Apply</button>
+                    <button class="control-btn primary" id="applyFanBtn" onclick="applyFan()">Apply</button>
                 </div>
             </div>
 
@@ -913,47 +958,87 @@
             .then(r => r.json())
             .then(limits => {
                 controlLimits = limits;
+                // Frequency
                 document.getElementById('freqSlider').min = limits.min_frequency;
                 document.getElementById('freqSlider').max = limits.max_frequency;
+                document.getElementById('freqInput').min = limits.min_frequency;
+                document.getElementById('freqInput').max = limits.max_frequency;
+                // Voltage
                 document.getElementById('voltageSlider').min = limits.min_voltage;
                 document.getElementById('voltageSlider').max = limits.max_voltage;
+                document.getElementById('voltageInput').min = limits.min_voltage;
+                document.getElementById('voltageInput').max = limits.max_voltage;
+                // Fan
                 document.getElementById('fanSlider').min = limits.min_fan_speed;
                 document.getElementById('fanSlider').max = limits.max_fan_speed;
+                document.getElementById('fanInput').min = limits.min_fan_speed;
+                document.getElementById('fanInput').max = limits.max_fan_speed;
             })
             .catch(() => {});
 
-        // Slider value displays
-        document.getElementById('freqSlider').addEventListener('input', function() {
-            document.getElementById('freqValue').textContent = this.value + ' MHz';
-        });
-        document.getElementById('voltageSlider').addEventListener('input', function() {
-            document.getElementById('voltageValue').textContent = this.value + ' mV';
-        });
-        document.getElementById('fanSlider').addEventListener('input', function() {
-            document.getElementById('fanValue').textContent = this.value + '%';
-        });
+        // Sync sliders with number inputs
+        function syncControls(sliderId, inputId) {
+            const slider = document.getElementById(sliderId);
+            const input = document.getElementById(inputId);
 
-        function openControlModal(miner) {
+            slider.addEventListener('input', () => { input.value = slider.value; });
+            input.addEventListener('input', () => {
+                let val = parseInt(input.value) || parseInt(slider.min);
+                val = Math.max(parseInt(slider.min), Math.min(parseInt(slider.max), val));
+                slider.value = val;
+            });
+            input.addEventListener('blur', () => {
+                // Clamp value on blur
+                let val = parseInt(input.value) || parseInt(slider.min);
+                val = Math.max(parseInt(slider.min), Math.min(parseInt(slider.max), val));
+                input.value = val;
+                slider.value = val;
+            });
+        }
+
+        syncControls('freqSlider', 'freqInput');
+        syncControls('voltageSlider', 'voltageInput');
+        syncControls('fanSlider', 'fanInput');
+
+        async function openControlModal(miner) {
             selectedMiner = miner;
             document.getElementById('modalTitle').textContent = miner.name + ' Settings';
-            document.getElementById('currentFreq').textContent = miner.frequency + ' MHz';
-            document.getElementById('currentVoltage').textContent = miner.core_voltage + ' mV';
-            document.getElementById('currentFan').textContent = miner.fan_speed + '%';
 
-            // Set sliders to current values
-            document.getElementById('freqSlider').value = miner.frequency;
-            document.getElementById('freqValue').textContent = miner.frequency + ' MHz';
-            document.getElementById('voltageSlider').value = miner.core_voltage;
-            document.getElementById('voltageValue').textContent = miner.core_voltage + ' mV';
-            document.getElementById('fanSlider').value = miner.fan_speed;
-
-            // Reset fan mode to auto
-            setFanMode('auto');
-
-            // Clear any previous status
+            // Show modal with loading state
             document.getElementById('statusMessage').className = 'status-message';
-
             document.getElementById('controlModal').classList.add('active');
+
+            // Use cached values initially
+            setControlValues(miner.frequency, miner.core_voltage, miner.fan_speed, true);
+
+            // Fetch live settings from device
+            try {
+                const response = await fetch(`/api/control/${miner.name}/settings`);
+                if (response.ok) {
+                    const settings = await response.json();
+                    setControlValues(settings.frequency, settings.core_voltage, settings.fan_speed, settings.autofan);
+                }
+            } catch (e) {
+                console.error('Failed to fetch live settings:', e);
+            }
+        }
+
+        function setControlValues(frequency, voltage, fanSpeed, autofan) {
+            // Current settings display
+            document.getElementById('currentFreq').textContent = frequency + ' MHz';
+            document.getElementById('currentVoltage').textContent = voltage + ' mV';
+            document.getElementById('currentFan').textContent = autofan ? 'Auto' : fanSpeed + '%';
+
+            // Set control values
+            document.getElementById('freqSlider').value = frequency;
+            document.getElementById('freqInput').value = frequency;
+            document.getElementById('voltageSlider').value = voltage;
+            document.getElementById('voltageInput').value = voltage;
+            document.getElementById('fanSlider').value = fanSpeed;
+            document.getElementById('fanInput').value = fanSpeed;
+
+            // Set fan mode based on device state
+            setFanMode(autofan ? 'auto' : 'manual');
         }
 
         function closeModal() {
@@ -976,21 +1061,18 @@
             const autoBtn = document.getElementById('fanAutoBtn');
             const manualBtn = document.getElementById('fanManualBtn');
             const slider = document.getElementById('fanSlider');
-            const applyBtn = document.getElementById('applyFanBtn');
-            const valueDisplay = document.getElementById('fanValue');
+            const input = document.getElementById('fanInput');
 
             if (mode === 'auto') {
                 autoBtn.classList.add('active');
                 manualBtn.classList.remove('active');
                 slider.disabled = true;
-                applyBtn.disabled = true;
-                valueDisplay.textContent = 'Auto';
+                input.disabled = true;
             } else {
                 autoBtn.classList.remove('active');
                 manualBtn.classList.add('active');
                 slider.disabled = false;
-                applyBtn.disabled = false;
-                valueDisplay.textContent = slider.value + '%';
+                input.disabled = false;
             }
         }
 
@@ -1005,7 +1087,13 @@
 
         async function applyFrequency() {
             if (!selectedMiner) return;
-            const frequency = parseInt(document.getElementById('freqSlider').value);
+            const frequency = parseInt(document.getElementById('freqInput').value);
+
+            // Validate
+            if (frequency < controlLimits.min_frequency || frequency > controlLimits.max_frequency) {
+                showStatus(`Frequency must be ${controlLimits.min_frequency}-${controlLimits.max_frequency} MHz`, true);
+                return;
+            }
 
             try {
                 const response = await fetch(`/api/control/${selectedMiner.name}/frequency`, {
@@ -1027,7 +1115,13 @@
 
         async function applyVoltage() {
             if (!selectedMiner) return;
-            const voltage = parseInt(document.getElementById('voltageSlider').value);
+            const voltage = parseInt(document.getElementById('voltageInput').value);
+
+            // Validate
+            if (voltage < controlLimits.min_voltage || voltage > controlLimits.max_voltage) {
+                showStatus(`Voltage must be ${controlLimits.min_voltage}-${controlLimits.max_voltage} mV`, true);
+                return;
+            }
 
             try {
                 const response = await fetch(`/api/control/${selectedMiner.name}/voltage`, {
@@ -1059,6 +1153,7 @@
                     const data = await response.json();
                     if (response.ok) {
                         showStatus('Auto fan enabled');
+                        document.getElementById('currentFan').textContent = 'Auto';
                     } else {
                         showStatus(data.error || 'Failed to enable auto fan', true);
                     }
@@ -1066,7 +1161,14 @@
                     showStatus('Connection error', true);
                 }
             } else {
-                const fan_speed = parseInt(document.getElementById('fanSlider').value);
+                const fan_speed = parseInt(document.getElementById('fanInput').value);
+
+                // Validate
+                if (fan_speed < controlLimits.min_fan_speed || fan_speed > controlLimits.max_fan_speed) {
+                    showStatus(`Fan speed must be ${controlLimits.min_fan_speed}-${controlLimits.max_fan_speed}%`, true);
+                    return;
+                }
+
                 try {
                     const response = await fetch(`/api/control/${selectedMiner.name}/fan`, {
                         method: 'POST',

@@ -522,6 +522,30 @@ def get_control_limits():
     return jsonify(CONTROL_LIMITS)
 
 
+@app.route('/api/control/<device_id>/settings', methods=['GET'])
+def get_device_settings(device_id):
+    """Get current device settings directly from the Bitaxe."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    try:
+        response = requests.get(f"http://{ip}/api/system/info", timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        return jsonify({
+            'frequency': data.get('frequency', 0),
+            'core_voltage': data.get('coreVoltage', 0),
+            'fan_speed': data.get('fanspeed', 0),
+            'autofan': data.get('autofanspeed', 1) == 1,  # True if auto mode
+            'fan_rpm': data.get('fanrpm', 0),
+        })
+    except requests.RequestException as e:
+        logger.error(f"Failed to get settings from {device_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/control/<device_id>/frequency', methods=['POST'])
 def set_device_frequency(device_id):
     """Set device frequency (MHz)."""
