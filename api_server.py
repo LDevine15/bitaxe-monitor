@@ -26,7 +26,8 @@ CONTROL_LIMITS = {
 }
 
 # Initialize Flask app with static folder
-app = Flask(__name__, static_folder='static')
+# static_url_path='' makes static files accessible from root (e.g., /css/styles.css)
+app = Flask(__name__, static_folder='static', static_url_path='')
 CORS(app)  # Allow cross-origin requests from ESP32
 
 
