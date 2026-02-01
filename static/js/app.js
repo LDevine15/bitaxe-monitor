@@ -125,7 +125,7 @@ async function updateHashrateChart() {
                             ticks: {
                                 color: '#8b949e',
                                 callback: function(value) {
-                                    return value.toFixed(1) + ' TH/s';
+                                    return value.toFixed(2) + ' TH/s';
                                 }
                             },
                             beginAtZero: false
