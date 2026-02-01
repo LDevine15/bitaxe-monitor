@@ -44,7 +44,12 @@
 
         <!-- Hashrate Chart -->
         <div class="swarm-summary" style="margin-bottom: 24px;">
-            <h2 id="chartTitle">Hashrate (2h)</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <h2 id="chartTitle" style="margin: 0;">Hashrate (2h)</h2>
+                <select id="chartDeviceSelect" style="background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 14px;">
+                    <option value="">All Miners (Swarm)</option>
+                </select>
+            </div>
             <div style="height: 200px;">
                 <canvas id="hashrateChart"></canvas>
             </div>

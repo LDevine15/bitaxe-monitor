@@ -274,29 +274,39 @@ def get_hashrate_trend(device_id):
     from datetime import datetime, timedelta
     from flask import request
 
-    minutes = request.args.get('minutes', 60, type=int)
-    num_buckets = request.args.get('buckets', 30, type=int)
+    minutes = request.args.get('minutes', 120, type=int)
+    num_buckets = request.args.get('buckets', 60, type=int)
 
     try:
-        lookback_time = datetime.now() - timedelta(minutes=minutes)
+        # Get max timestamp as reference (handles stale data)
+        cursor = db.conn.cursor()
+        cursor.execute(
+            "SELECT MAX(timestamp) FROM performance_metrics WHERE device_id = ?",
+            (device_id,)
+        )
+        max_row = cursor.fetchone()
+
+        if not max_row or not max_row[0]:
+            return jsonify({'labels': [], 'data': []})
+
+        end_time = datetime.fromisoformat(max_row[0])
+        start_time = end_time - timedelta(minutes=minutes)
         bucket_size_minutes = minutes / num_buckets
 
-        cursor = db.conn.cursor()
         cursor.execute("""
             SELECT hashrate, timestamp
             FROM performance_metrics
             WHERE device_id = ?
               AND timestamp >= ?
             ORDER BY timestamp ASC
-        """, (device_id, lookback_time))
+        """, (device_id, start_time))
 
         rows = cursor.fetchall()
         if not rows:
-            return jsonify([])
+            return jsonify({'labels': [], 'data': []})
 
         # Group samples into buckets and average
         buckets = [[] for _ in range(num_buckets)]
-        start_time = datetime.fromisoformat(rows[0][1])
 
         for hashrate, timestamp_str in rows:
             timestamp = datetime.fromisoformat(timestamp_str)
@@ -304,17 +314,25 @@ def get_hashrate_trend(device_id):
             bucket_idx = int(elapsed_minutes / bucket_size_minutes)
             if bucket_idx >= num_buckets:
                 bucket_idx = num_buckets - 1
+            if bucket_idx < 0:
+                bucket_idx = 0
             buckets[bucket_idx].append(hashrate)
 
-        # Calculate average for each bucket
-        averages = []
-        for bucket in buckets:
-            if bucket:
-                averages.append(sum(bucket) / len(bucket))
-            elif averages:
-                averages.append(averages[-1])
+        # Calculate average for each bucket and generate labels
+        data = []
+        labels = []
+        for i, bucket in enumerate(buckets):
+            bucket_time = start_time + timedelta(minutes=i * bucket_size_minutes)
+            labels.append(bucket_time.strftime('%H:%M'))
 
-        return jsonify(averages)
+            if bucket:
+                data.append(round(sum(bucket) / len(bucket), 1))
+            elif data:
+                data.append(data[-1])  # Carry forward last value
+            else:
+                data.append(None)
+
+        return jsonify({'labels': labels, 'data': data})
     except Exception as e:
         logger.error(f"Error getting hashrate trend for {device_id}: {e}")
         return jsonify({'error': str(e)}), 500

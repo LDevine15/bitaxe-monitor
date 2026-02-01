@@ -6,6 +6,8 @@ const REFRESH_INTERVAL = 10000; // 10 seconds
 let refreshTimer;
 let chartTimer;
 let hashrateChart = null;
+let selectedChartDevice = ''; // Empty = swarm, otherwise device_id
+let minersList = []; // Cache of miners for dropdown
 
 // =================================================================
 // Utility Functions
@@ -45,14 +47,19 @@ function getTempBarColor(temp) {
 
 async function updateHashrateChart() {
     try {
-        const response = await fetch('/api/swarm/hashrate-trend?minutes=120&buckets=60');
+        // Choose endpoint based on device selection
+        const endpoint = selectedChartDevice
+            ? `/api/metrics/hashrate-trend/${encodeURIComponent(selectedChartDevice)}?minutes=120&buckets=60`
+            : '/api/swarm/hashrate-trend?minutes=120&buckets=60';
+
+        const response = await fetch(endpoint);
         if (!response.ok) return;
 
         const { labels, data } = await response.json();
         if (!labels || !data) return;
 
         // Convert GH/s to TH/s
-        const dataTHs = data.map(v => v / 1000);
+        const dataTHs = data.map(v => v ? v / 1000 : 0);
 
         // Calculate 2h average
         const validData = dataTHs.filter(v => v > 0);
@@ -61,15 +68,20 @@ async function updateHashrateChart() {
             : 0;
         const avgLine = dataTHs.map(() => avg);
 
-        // Update title with average
-        document.getElementById('chartTitle').textContent = `Hashrate (2h) — Avg: ${avg.toFixed(2)} TH/s`;
+        // Update title with device name and average
+        const deviceLabel = selectedChartDevice || 'Swarm';
+        document.getElementById('chartTitle').textContent = `${deviceLabel} Hashrate (2h) — Avg: ${avg.toFixed(2)} TH/s`;
 
         const ctx = document.getElementById('hashrateChart').getContext('2d');
+
+        // Determine chart label
+        const chartLabel = selectedChartDevice ? `${selectedChartDevice} Hashrate` : 'Swarm Hashrate';
 
         if (hashrateChart) {
             // Update existing chart
             hashrateChart.data.labels = labels;
             hashrateChart.data.datasets[0].data = dataTHs;
+            hashrateChart.data.datasets[0].label = chartLabel;
             hashrateChart.data.datasets[1].data = avgLine;
             hashrateChart.update('none');
         } else {
@@ -79,7 +91,7 @@ async function updateHashrateChart() {
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'Swarm Hashrate',
+                        label: chartLabel,
                         data: dataTHs,
                         borderColor: '#58a6ff',
                         backgroundColor: 'rgba(88, 166, 255, 0.1)',
@@ -259,6 +271,12 @@ async function fetchData() {
             grid.appendChild(createMinerCard(miner));
         });
 
+        // Update device selector dropdown if miners list changed
+        if (JSON.stringify(minersList.map(m => m.name)) !== JSON.stringify(data.miners.map(m => m.name))) {
+            minersList = data.miners;
+            populateDeviceSelector();
+        }
+
         // Update status
         statusIndicator.className = 'status-indicator';
         document.getElementById('lastUpdate').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
@@ -281,10 +299,43 @@ async function fetchData() {
 }
 
 // =================================================================
+// Device Selector
+// =================================================================
+
+function populateDeviceSelector() {
+    const select = document.getElementById('chartDeviceSelect');
+    const currentValue = select.value;
+
+    // Clear existing options except the first (All Miners)
+    select.innerHTML = '<option value="">All Miners (Swarm)</option>';
+
+    // Add each miner
+    minersList.forEach(miner => {
+        const option = document.createElement('option');
+        option.value = miner.name;
+        option.textContent = miner.name;
+        select.appendChild(option);
+    });
+
+    // Restore selection if it still exists
+    if (minersList.some(m => m.name === currentValue)) {
+        select.value = currentValue;
+    }
+}
+
+function onDeviceSelectChange(event) {
+    selectedChartDevice = event.target.value;
+    updateHashrateChart();
+}
+
+// =================================================================
 // Initialization
 // =================================================================
 
 function initApp() {
+    // Set up device selector change handler
+    document.getElementById('chartDeviceSelect').addEventListener('change', onDeviceSelectChange);
+
     // Initial fetch
     fetchData();
     updateHashrateChart();
