@@ -10,19 +10,31 @@
 # =============================================================================
 # DEVICES - Add your Bitaxe miners here
 # =============================================================================
+# The 'group' field is optional - devices in different groups get separate charts
+# with their own Y-axis scaling. Useful when mixing different hardware types
+# (e.g., single-chip Bitaxe vs 4-chip NerdQAxe).
 devices:
   - name: "bitaxe-1"
     ip: "192.168.1.100"           # Replace with your Bitaxe IP
     enabled: true
+    group: "bitaxe"               # Optional: group for chart separation
 
   - name: "bitaxe-2"
     ip: "192.168.1.101"           # Replace with your Bitaxe IP
     enabled: true
+    group: "bitaxe"
 
   # Add more devices as needed:
   # - name: "bitaxe-3"
   #   ip: "192.168.1.102"
   #   enabled: true
+  #   group: "bitaxe"
+
+  # NerdQAxe devices (4-chip units) - use a different group for proper scaling
+  # - name: "nerdqaxe-1"
+  #   ip: "192.168.1.200"
+  #   enabled: true
+  #   group: "nerdqaxe"
 
 # =============================================================================
 # LOGGING - Data collection settings

@@ -271,18 +271,41 @@ class BitaxeBot(commands.Bot):
             full_report += f"\n{report_12h}\n{report_1h}"
 
             if self.config.auto_report.include_charts:
-                # Generate charts (use 12h for charts) - run in executor
+                # Group devices by their 'group' field for separate charts
+                device_groups = {}
+                for device in self.devices:
+                    group_name = device.get('group', 'default')
+                    if group_name not in device_groups:
+                        device_groups[group_name] = []
+                    device_groups[group_name].append(device['name'])
+
+                # Generate combined swarm hashrate chart (all devices)
                 swarm_chart = await self._run_blocking(
                     self.chart_generator.generate_swarm_hashrate_chart, hours, device_ids
                 )
-                miner_chart = await self._run_blocking(
-                    self.chart_generator.generate_miner_detail_chart, hours, device_ids
-                )
+                
+                files = [discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")]
 
-                swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
-                miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
+                # Generate separate miner detail charts per group (for proper Y-axis scaling)
+                if len(device_groups) > 1:
+                    # Multiple groups - generate separate charts
+                    for group_name, group_device_ids in sorted(device_groups.items()):
+                        if group_device_ids:  # Skip empty groups
+                            miner_chart = await self._run_blocking(
+                                self.chart_generator.generate_miner_detail_chart, hours, group_device_ids
+                            )
+                            files.append(discord.File(
+                                io.BytesIO(miner_chart), 
+                                filename=f"{group_name}_details_{hours}h.png"
+                            ))
+                else:
+                    # Single group or no groups - generate one combined chart
+                    miner_chart = await self._run_blocking(
+                        self.chart_generator.generate_miner_detail_chart, hours, device_ids
+                    )
+                    files.append(discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png"))
 
-                await channel.send(content=f"**⛏️ Hourly Report**\n{full_report}", files=[swarm_file, miner_file])
+                await channel.send(content=f"**⛏️ Hourly Report**\n{full_report}", files=files)
             else:
                 await channel.send(f"**⛏️ Hourly Report**\n{full_report}")
 
@@ -333,20 +356,43 @@ class BitaxeBot(commands.Bot):
             full_report = f"{health_alerts}\n{report}" if health_alerts else report
 
             if self.config.weekly_report.include_charts:
-                # Generate charts - run in executor
+                # Group devices by their 'group' field for separate charts
+                device_groups = {}
+                for device in self.devices:
+                    group_name = device.get('group', 'default')
+                    if group_name not in device_groups:
+                        device_groups[group_name] = []
+                    device_groups[group_name].append(device['name'])
+
+                # Generate combined swarm hashrate chart (all devices)
                 swarm_chart = await self._run_blocking(
                     self.chart_generator.generate_swarm_hashrate_chart, hours, device_ids
                 )
-                miner_chart = await self._run_blocking(
-                    self.chart_generator.generate_miner_detail_chart, hours, device_ids
-                )
+                
+                files = [discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_7d.png")]
 
-                swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_7d.png")
-                miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_7d.png")
+                # Generate separate miner detail charts per group (for proper Y-axis scaling)
+                if len(device_groups) > 1:
+                    # Multiple groups - generate separate charts
+                    for group_name, group_device_ids in sorted(device_groups.items()):
+                        if group_device_ids:
+                            miner_chart = await self._run_blocking(
+                                self.chart_generator.generate_miner_detail_chart, hours, group_device_ids
+                            )
+                            files.append(discord.File(
+                                io.BytesIO(miner_chart), 
+                                filename=f"{group_name}_details_7d.png"
+                            ))
+                else:
+                    # Single group or no groups - generate one combined chart
+                    miner_chart = await self._run_blocking(
+                        self.chart_generator.generate_miner_detail_chart, hours, device_ids
+                    )
+                    files.append(discord.File(io.BytesIO(miner_chart), filename=f"miner_details_7d.png"))
 
                 await channel.send(
                     content=f"**⛏️ Weekly Report (7 days)**\n{full_report}",
-                    files=[swarm_file, miner_file]
+                    files=files
                 )
             else:
                 await channel.send(f"**⛏️ Weekly Report (7 days)**\n{full_report}")
@@ -941,20 +987,42 @@ class BitaxeBot(commands.Bot):
             # Get device IDs
             device_ids = [d['name'] for d in self.devices]
 
-            # Generate charts (run in executor to avoid blocking)
+            # Group devices by their 'group' field for separate charts
+            device_groups = {}
+            for device in self.devices:
+                group_name = device.get('group', 'default')
+                if group_name not in device_groups:
+                    device_groups[group_name] = []
+                device_groups[group_name].append(device['name'])
+
+            # Generate combined swarm hashrate chart (all devices)
             logger.info("Generating swarm hashrate chart...")
             swarm_chart = await self._run_blocking(
                 self.chart_generator.generate_swarm_hashrate_chart, hours, device_ids
             )
+            
+            files = [discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")]
 
-            logger.info("Generating miner detail chart...")
-            miner_chart = await self._run_blocking(
-                self.chart_generator.generate_miner_detail_chart, hours, device_ids
-            )
-
-            # Create Discord files
-            swarm_file = discord.File(io.BytesIO(swarm_chart), filename=f"swarm_hashrate_{hours}h.png")
-            miner_file = discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png")
+            # Generate separate miner detail charts per group (for proper Y-axis scaling)
+            if len(device_groups) > 1:
+                # Multiple groups - generate separate charts
+                for group_name, group_device_ids in sorted(device_groups.items()):
+                    if group_device_ids:
+                        logger.info(f"Generating miner detail chart for group: {group_name}...")
+                        miner_chart = await self._run_blocking(
+                            self.chart_generator.generate_miner_detail_chart, hours, group_device_ids
+                        )
+                        files.append(discord.File(
+                            io.BytesIO(miner_chart), 
+                            filename=f"{group_name}_details_{hours}h.png"
+                        ))
+            else:
+                # Single group or no groups - generate one combined chart
+                logger.info("Generating miner detail chart...")
+                miner_chart = await self._run_blocking(
+                    self.chart_generator.generate_miner_detail_chart, hours, device_ids
+                )
+                files.append(discord.File(io.BytesIO(miner_chart), filename=f"miner_details_{hours}h.png"))
 
             # Generate text report with health alerts (matching chart timespan) - run in executor
             health_alerts = await self._run_blocking(self.generate_health_alerts)
@@ -966,7 +1034,7 @@ class BitaxeBot(commands.Bot):
             # Send with attachments
             await ctx.send(
                 content=f"**⛏️ Bitaxe Mining Report ({timespan_label})**\n{full_report}",
-                files=[swarm_file, miner_file]
+                files=files
             )
 
             logger.info("Report sent successfully")
