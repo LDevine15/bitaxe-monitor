@@ -62,6 +62,39 @@ class BitaxeDashboard:
         self.ping_history = {}  # {device_id: [ping1, ping2, ...]}
         self.session_start = datetime.now()
 
+        # Build device-to-group mapping for power limits
+        self.device_groups = {}
+        for device in self.devices:
+            self.device_groups[device['name']] = device.get('group', 'default')
+
+    def get_power_limits(self, device_id: str) -> dict:
+        """Get power limits for a device based on its group.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Dict with max_power, warn_power, psu_capacity
+        """
+        # Default limits (single-chip Bitaxe)
+        defaults = {
+            'max_power': 40,
+            'warn_power': 35,
+            'psu_capacity': 40
+        }
+
+        group_name = self.device_groups.get(device_id, 'default')
+        group_config = self.config.get('device_groups', {}).get(group_name)
+
+        if group_config:
+            return {
+                'max_power': group_config.get('max_power', defaults['max_power']),
+                'warn_power': group_config.get('warn_power', defaults['warn_power']),
+                'psu_capacity': group_config.get('psu_capacity', defaults['psu_capacity'])
+            }
+
+        return defaults
+
     def ping_device(self, ip_address: str) -> Optional[float]:
         """Ping a device and return latency in milliseconds.
 
@@ -873,13 +906,18 @@ class BitaxeDashboard:
             f"[{vr_color}]{vreg_temp:.1f}°C[/{vr_color}]"
         )
 
-        # Power with color coding
+        # Power with color coding (using group-specific limits)
         power = latest['power']
-        power_color = "red" if power >= 40 else "yellow" if power >= 35 else "white"
-        power_pct = int(power / 40 * 100)  # 40W = 100%
+        power_limits = self.get_power_limits(device_id)
+        max_pwr = power_limits['max_power']
+        warn_pwr = power_limits['warn_power']
+        psu_cap = power_limits['psu_capacity']
+
+        power_color = "red" if power >= max_pwr else "yellow" if power >= warn_pwr else "white"
+        power_pct = int(power / psu_cap * 100)
         table.add_row(
             "Power:",
-            f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of 40W)"
+            f"[{power_color}]{power:.1f}W[/{power_color}] {'█' * (power_pct // 10)} ({power_pct}% of {psu_cap}W)"
         )
 
 
@@ -1028,9 +1066,9 @@ class BitaxeDashboard:
             warnings.append("[red]⚠️  PSU VOLTAGE SAG[/red]")
         elif voltage < 4.9:
             warnings.append("[yellow]⚠️  Low Input Voltage[/yellow]")
-        if power >= 40:
+        if power >= max_pwr:
             warnings.append("[red]⚠️  HIGH POWER DRAW[/red]")
-        elif power >= 35:
+        elif power >= warn_pwr:
             warnings.append("[yellow]⚠️  Approaching PSU Limit[/yellow]")
 
         if warnings:

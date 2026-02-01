@@ -37,6 +37,23 @@ devices:
   #   group: "nerdqaxe"
 
 # =============================================================================
+# DEVICE GROUPS - Power limits per hardware type (for dashboard warnings)
+# =============================================================================
+# Define power thresholds for each device group. These control:
+#   - Dashboard power bar display (% of PSU capacity)
+#   - Warning thresholds (yellow/red alerts)
+#   - Chart Y-axis scaling for power graphs
+device_groups:
+  bitaxe:                              # Single-chip Bitaxe (Ultra, Supra, etc.)
+    max_power: 40                      # Red warning threshold (W)
+    warn_power: 35                     # Yellow warning threshold (W)
+    psu_capacity: 40                   # PSU rated capacity for % display
+  nerdqaxe:                            # 4-chip NerdQAxe
+    max_power: 110                     # Safe sustained (~90% of PSU)
+    warn_power: 96                     # Warning threshold (~80% of PSU)
+    psu_capacity: 120                  # Stock 120W PSU
+
+# =============================================================================
 # LOGGING - Data collection settings
 # =============================================================================
 logging:
