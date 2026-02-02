@@ -559,6 +559,8 @@ def get_device_settings(device_id):
             'fan_speed': data.get('fanspeed', 0),
             'autofan': data.get('autofanspeed', 1) == 1,  # True if auto mode
             'fan_rpm': data.get('fanrpm', 0),
+            'temp_target': data.get('temptarget', 65),  # Auto fan target temp
+            'min_fan_speed': data.get('minFanSpeed', 0),  # Auto fan min speed
         })
     except requests.RequestException as e:
         logger.error(f"Failed to get settings from {device_id}: {e}")
@@ -666,20 +668,35 @@ def set_device_fan(device_id):
 
 @app.route('/api/control/<device_id>/autofan', methods=['POST'])
 def enable_device_autofan(device_id):
-    """Enable auto fan mode."""
+    """Enable auto fan mode with optional target temp and min fan speed."""
     ip = get_device_ip(device_id)
     if not ip:
         return jsonify({'error': 'Device not found'}), 404
 
+    data = request.get_json() or {}
+    payload = {'autofanspeed': 1}
+
+    # Optional: target temperature (0-100°C)
+    if 'temp_target' in data:
+        temp_target = int(data['temp_target'])
+        if 0 <= temp_target <= 100:
+            payload['temptarget'] = temp_target
+
+    # Optional: minimum fan speed (0-100%)
+    if 'min_fan_speed' in data:
+        min_fan = int(data['min_fan_speed'])
+        if 0 <= min_fan <= 100:
+            payload['minFanSpeed'] = min_fan
+
     try:
         response = requests.patch(
             f"http://{ip}/api/system",
-            json={'autofanspeed': 1},
+            json=payload,
             timeout=5
         )
         response.raise_for_status()
-        logger.info(f"Enabled auto fan on {device_id}")
-        return jsonify({'success': True})
+        logger.info(f"Enabled auto fan on {device_id} with settings: {payload}")
+        return jsonify({'success': True, **payload})
     except requests.RequestException as e:
         logger.error(f"Failed to enable auto fan on {device_id}: {e}")
         return jsonify({'error': str(e)}), 500

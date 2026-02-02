@@ -42,6 +42,8 @@ function initControls() {
     syncControls('freqSlider', 'freqInput');
     syncControls('voltageSlider', 'voltageInput');
     syncControls('fanSlider', 'fanInput');
+    syncControls('tempTargetSlider', 'tempTargetInput');
+    syncControls('minFanSlider', 'minFanInput');
 
     // Close modal on overlay click
     document.getElementById('controlModal').addEventListener('click', function(e) {
@@ -85,34 +87,53 @@ async function openControlModal(miner) {
     document.getElementById('statusMessage').className = 'status-message';
     document.getElementById('controlModal').classList.add('active');
 
-    // Use cached values initially
-    setControlValues(miner.frequency, miner.core_voltage, miner.fan_speed, true);
+    // Use cached values initially (assume auto mode until we fetch live settings)
+    setControlValues({
+        frequency: miner.frequency,
+        core_voltage: miner.core_voltage,
+        fan_speed: miner.fan_speed,
+        autofan: true,
+        temp_target: 65,
+        min_fan_speed: 0
+    });
 
     // Fetch live settings from device
     try {
         const response = await fetch(`/api/control/${miner.name}/settings`);
         if (response.ok) {
             const settings = await response.json();
-            setControlValues(settings.frequency, settings.core_voltage, settings.fan_speed, settings.autofan);
+            setControlValues(settings);
         }
     } catch (e) {
         console.error('Failed to fetch live settings:', e);
     }
 }
 
-function setControlValues(frequency, voltage, fanSpeed, autofan) {
+function setControlValues(settings) {
+    const { frequency, core_voltage, fan_speed, autofan, temp_target, min_fan_speed } = settings;
+
     // Current settings display
     document.getElementById('currentFreq').textContent = frequency + ' MHz';
-    document.getElementById('currentVoltage').textContent = voltage + ' mV';
-    document.getElementById('currentFan').textContent = autofan ? 'Auto' : fanSpeed + '%';
+    document.getElementById('currentVoltage').textContent = core_voltage + ' mV';
+    if (autofan) {
+        document.getElementById('currentFan').textContent = `Auto (${temp_target}°C)`;
+    } else {
+        document.getElementById('currentFan').textContent = fan_speed + '%';
+    }
 
     // Set control values
     document.getElementById('freqSlider').value = frequency;
     document.getElementById('freqInput').value = frequency;
-    document.getElementById('voltageSlider').value = voltage;
-    document.getElementById('voltageInput').value = voltage;
-    document.getElementById('fanSlider').value = fanSpeed;
-    document.getElementById('fanInput').value = fanSpeed;
+    document.getElementById('voltageSlider').value = core_voltage;
+    document.getElementById('voltageInput').value = core_voltage;
+    document.getElementById('fanSlider').value = fan_speed;
+    document.getElementById('fanInput').value = fan_speed;
+
+    // Set auto fan values
+    document.getElementById('tempTargetSlider').value = temp_target || 65;
+    document.getElementById('tempTargetInput').value = temp_target || 65;
+    document.getElementById('minFanSlider').value = min_fan_speed || 0;
+    document.getElementById('minFanInput').value = min_fan_speed || 0;
 
     // Set fan mode based on device state
     setFanMode(autofan ? 'auto' : 'manual');
@@ -131,19 +152,19 @@ function setFanMode(mode) {
     fanMode = mode;
     const autoBtn = document.getElementById('fanAutoBtn');
     const manualBtn = document.getElementById('fanManualBtn');
-    const slider = document.getElementById('fanSlider');
-    const input = document.getElementById('fanInput');
+    const autoSettings = document.getElementById('autoFanSettings');
+    const manualSettings = document.getElementById('manualFanSettings');
 
     if (mode === 'auto') {
         autoBtn.classList.add('active');
         manualBtn.classList.remove('active');
-        slider.disabled = true;
-        input.disabled = true;
+        autoSettings.style.display = 'block';
+        manualSettings.style.display = 'none';
     } else {
         autoBtn.classList.remove('active');
         manualBtn.classList.add('active');
-        slider.disabled = false;
-        input.disabled = false;
+        autoSettings.style.display = 'none';
+        manualSettings.style.display = 'block';
     }
 }
 
@@ -222,15 +243,19 @@ async function applyFan() {
     if (!selectedMiner) return;
 
     if (fanMode === 'auto') {
+        const temp_target = parseInt(document.getElementById('tempTargetInput').value);
+        const min_fan_speed = parseInt(document.getElementById('minFanInput').value);
+
         try {
             const response = await fetch(`/api/control/${selectedMiner.name}/autofan`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ temp_target, min_fan_speed })
             });
             const data = await response.json();
             if (response.ok) {
-                showStatus('Auto fan enabled');
-                document.getElementById('currentFan').textContent = 'Auto';
+                showStatus(`Auto fan enabled (target: ${temp_target}°C)`);
+                document.getElementById('currentFan').textContent = `Auto (${temp_target}°C)`;
             } else {
                 showStatus(data.error || 'Failed to enable auto fan', true);
             }

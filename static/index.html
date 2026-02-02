@@ -125,13 +125,38 @@
                     <button class="fan-toggle-btn" id="fanAutoBtn" onclick="setFanMode('auto')">Auto</button>
                     <button class="fan-toggle-btn" id="fanManualBtn" onclick="setFanMode('manual')">Manual</button>
                 </div>
-                <div class="control-input-row">
-                    <input type="range" class="control-slider" id="fanSlider"
-                           min="0" max="100" step="5" value="100">
-                    <input type="number" class="control-number-input" id="fanInput"
-                           min="0" max="100" step="5" value="100">
-                    <span class="control-unit">%</span>
+
+                <!-- Auto Fan Settings -->
+                <div id="autoFanSettings" style="display: none;">
+                    <div class="control-input-row" style="margin-bottom: 8px;">
+                        <span style="min-width: 100px; color: var(--text-secondary);">Target Temp</span>
+                        <input type="range" class="control-slider" id="tempTargetSlider"
+                               min="40" max="75" step="1" value="65">
+                        <input type="number" class="control-number-input" id="tempTargetInput"
+                               min="40" max="75" step="1" value="65">
+                        <span class="control-unit">°C</span>
+                    </div>
+                    <div class="control-input-row">
+                        <span style="min-width: 100px; color: var(--text-secondary);">Min Fan</span>
+                        <input type="range" class="control-slider" id="minFanSlider"
+                               min="0" max="100" step="5" value="0">
+                        <input type="number" class="control-number-input" id="minFanInput"
+                               min="0" max="100" step="5" value="0">
+                        <span class="control-unit">%</span>
+                    </div>
                 </div>
+
+                <!-- Manual Fan Settings -->
+                <div id="manualFanSettings">
+                    <div class="control-input-row">
+                        <input type="range" class="control-slider" id="fanSlider"
+                               min="0" max="100" step="5" value="100">
+                        <input type="number" class="control-number-input" id="fanInput"
+                               min="0" max="100" step="5" value="100">
+                        <span class="control-unit">%</span>
+                    </div>
+                </div>
+
                 <div class="control-buttons">
                     <button class="control-btn primary" id="applyFanBtn" onclick="applyFan()">Apply</button>
                 </div>
