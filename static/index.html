@@ -39,6 +39,10 @@
                     <div class="stat-value power" id="totalPower">--</div>
                     <div class="stat-label">Total Power</div>
                 </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="bestDiff">--</div>
+                    <div class="stat-label">Best Difficulty</div>
+                </div>
             </div>
         </div>
 
@@ -46,9 +50,17 @@
         <div class="swarm-summary" style="margin-bottom: 24px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <h2 id="chartTitle" style="margin: 0;">Hashrate (2h)</h2>
-                <select id="chartDeviceSelect" style="background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 14px;">
-                    <option value="">All Miners (Swarm)</option>
-                </select>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <select id="chartRangeSelect" style="background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 14px;">
+                        <option value="120">2h</option>
+                        <option value="480">8h</option>
+                        <option value="1440">24h</option>
+                        <option value="4320">3d</option>
+                    </select>
+                    <select id="chartDeviceSelect" style="background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 14px;">
+                        <option value="">All Miners (Swarm)</option>
+                    </select>
+                </div>
             </div>
             <div style="height: 200px;">
                 <canvas id="hashrateChart"></canvas>

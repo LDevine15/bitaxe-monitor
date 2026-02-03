@@ -7,6 +7,7 @@ let refreshTimer;
 let chartTimer;
 let hashrateChart = null;
 let selectedChartDevice = ''; // Empty = swarm, otherwise device_id
+let selectedChartRange = 120; // Minutes: 120, 480, 1440, 4320
 let minersList = []; // Cache of miners for dropdown
 
 // =================================================================
@@ -41,6 +42,20 @@ function getTempBarColor(temp) {
     return 'var(--accent-green)';
 }
 
+function formatDifficulty(diff) {
+    if (diff == null) return '--';
+    if (diff >= 1e12) return (diff / 1e12).toFixed(2) + ' T';
+    if (diff >= 1e9)  return (diff / 1e9).toFixed(2) + ' G';
+    if (diff >= 1e6)  return (diff / 1e6).toFixed(2) + ' M';
+    if (diff >= 1e3)  return (diff / 1e3).toFixed(2) + ' K';
+    return Math.round(diff).toString();
+}
+
+function getRangeLabel(minutes) {
+    if (minutes >= 1440) return (minutes / 1440) + 'd';
+    return (minutes / 60) + 'h';
+}
+
 // =================================================================
 // Chart
 // =================================================================
@@ -49,8 +64,8 @@ async function updateHashrateChart() {
     try {
         // Choose endpoint based on device selection
         const endpoint = selectedChartDevice
-            ? `/api/metrics/hashrate-trend/${encodeURIComponent(selectedChartDevice)}?minutes=120&buckets=60`
-            : '/api/swarm/hashrate-trend?minutes=120&buckets=60';
+            ? `/api/metrics/hashrate-trend/${encodeURIComponent(selectedChartDevice)}?minutes=${selectedChartRange}&buckets=60`
+            : `/api/swarm/hashrate-trend?minutes=${selectedChartRange}&buckets=60`;
 
         const response = await fetch(endpoint);
         if (!response.ok) return;
@@ -68,9 +83,10 @@ async function updateHashrateChart() {
             : 0;
         const avgLine = dataTHs.map(() => avg);
 
-        // Update title with device name and average
+        // Update title with device name, range, and average
         const deviceLabel = selectedChartDevice || 'Swarm';
-        document.getElementById('chartTitle').textContent = `${deviceLabel} Hashrate (2h) — Avg: ${avg.toFixed(2)} TH/s`;
+        const rangeLabel = getRangeLabel(selectedChartRange);
+        document.getElementById('chartTitle').textContent = `${deviceLabel} Hashrate (${rangeLabel}) — Avg: ${avg.toFixed(2)} TH/s`;
 
         const ctx = document.getElementById('hashrateChart').getContext('2d');
 
@@ -263,6 +279,7 @@ async function fetchData() {
         document.getElementById('activeMiners').textContent = `${data.active_count}/${data.total_count}`;
         document.getElementById('avgEfficiency').textContent = `${data.avg_efficiency} J/TH`;
         document.getElementById('totalPower').textContent = `${data.total_power}W`;
+        document.getElementById('bestDiff').textContent = formatDifficulty(data.best_diff);
 
         // Update miner grid
         const grid = document.getElementById('minerGrid');
@@ -328,13 +345,19 @@ function onDeviceSelectChange(event) {
     updateHashrateChart();
 }
 
+function onRangeSelectChange(event) {
+    selectedChartRange = parseInt(event.target.value);
+    updateHashrateChart();
+}
+
 // =================================================================
 // Initialization
 // =================================================================
 
 function initApp() {
-    // Set up device selector change handler
+    // Set up chart control handlers
     document.getElementById('chartDeviceSelect').addEventListener('change', onDeviceSelectChange);
+    document.getElementById('chartRangeSelect').addEventListener('change', onRangeSelectChange);
 
     // Initial fetch
     fetchData();

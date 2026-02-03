@@ -140,12 +140,31 @@ def get_swarm_data():
         # Calculate average efficiency
         avg_efficiency = (total_power / (total_hashrate / 1000.0)) if total_hashrate > 0 else 0
 
+        # Get swarm highest difficulty (all-time across all devices)
+        best_diff = None
+        try:
+            device_ids = [d['name'] for d in devices]
+            placeholders = ','.join('?' * len(device_ids))
+            cursor = db.conn.cursor()
+            cursor.execute(f"""
+                SELECT MAX(best_diff)
+                FROM performance_metrics
+                WHERE device_id IN ({placeholders})
+                  AND best_diff IS NOT NULL
+            """, device_ids)
+            row = cursor.fetchone()
+            if row and row[0] is not None:
+                best_diff = row[0]
+        except Exception as e:
+            logger.error(f"Error getting swarm best diff: {e}")
+
         response = {
             'total_hashrate': round(total_hashrate, 2),  # GH/s
             'total_power': round(total_power, 1),  # W
             'avg_efficiency': round(avg_efficiency, 1),  # J/TH
             'active_count': active_count,
             'total_count': len(devices),
+            'best_diff': best_diff,
             'miners': miners,
             'timestamp': latest_timestamp  # Unix timestamp from actual data
         }
