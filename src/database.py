@@ -158,6 +158,10 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_timestamp
             ON performance_metrics(timestamp)
         """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_device_best_diff
+            ON performance_metrics(device_id, best_diff)
+        """)
 
         self.conn.commit()
         logger.debug("Database schema initialized")
