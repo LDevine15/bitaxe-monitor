@@ -37,6 +37,20 @@ CORS(app)  # Allow cross-origin requests from ESP32
 # Authentication (for Cloudflare Tunnel remote access)
 # =============================================================================
 
+def is_local_request():
+    """Check if request is from local network (skip auth for ESP32/local devices)."""
+    remote_ip = request.remote_addr or ''
+    # Local/private IP ranges
+    return (remote_ip.startswith('192.168.') or
+            remote_ip.startswith('10.') or
+            remote_ip.startswith('172.16.') or remote_ip.startswith('172.17.') or
+            remote_ip.startswith('172.18.') or remote_ip.startswith('172.19.') or
+            remote_ip.startswith('172.2') or remote_ip.startswith('172.30.') or
+            remote_ip.startswith('172.31.') or
+            remote_ip.startswith('127.') or
+            remote_ip == '::1')
+
+
 def check_auth(username, password):
     """Check if username/password match config credentials."""
     auth_config = config.get('auth', {})
@@ -47,9 +61,12 @@ def check_auth(username, password):
 
 
 def requires_auth(f):
-    """Decorator to require HTTP Basic Auth on routes."""
+    """Decorator to require HTTP Basic Auth on routes (skips for local network)."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Skip auth for local network requests (ESP32, local browser)
+        if is_local_request():
+            return f(*args, **kwargs)
         auth = request.authorization
         if not check_auth(auth.username if auth else None,
                           auth.password if auth else None):
