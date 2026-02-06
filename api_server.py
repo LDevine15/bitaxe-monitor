@@ -2,8 +2,10 @@
 """Flask API server for ESP32 display and web dashboard."""
 
 import logging
+import os
 from datetime import datetime
-from flask import Flask, jsonify, send_from_directory, request
+from functools import wraps
+from flask import Flask, jsonify, send_from_directory, request, Response
 from flask_cors import CORS
 import requests
 from src.database import Database
@@ -32,10 +34,37 @@ CORS(app)  # Allow cross-origin requests from ESP32
 
 
 # =============================================================================
+# Authentication (for Cloudflare Tunnel remote access)
+# =============================================================================
+
+def check_auth(username, password):
+    """Check if username/password match config credentials."""
+    auth_config = config.get('auth', {})
+    if not auth_config.get('enabled', False):
+        return True  # Auth disabled, allow all
+    return (username == auth_config.get('username') and
+            password == auth_config.get('password'))
+
+
+def requires_auth(f):
+    """Decorator to require HTTP Basic Auth on routes."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        auth = request.authorization
+        if not check_auth(auth.username if auth else None,
+                          auth.password if auth else None):
+            return Response('Unauthorized', 401,
+                            {'WWW-Authenticate': 'Basic realm="Bitaxe Monitor"'})
+        return f(*args, **kwargs)
+    return decorated
+
+
+# =============================================================================
 # Web Dashboard
 # =============================================================================
 
 @app.route('/')
+@requires_auth
 def serve_dashboard():
     """Serve the web dashboard."""
     return send_from_directory('static', 'index.html')
@@ -84,6 +113,7 @@ def get_cached_best_diff():
 
 
 @app.route('/swarm', methods=['GET'])
+@requires_auth
 def get_swarm_data():
     """Get current swarm status for ESP32 display and web dashboard.
 
@@ -567,12 +597,14 @@ def get_device_ip(device_id: str) -> str | None:
 
 
 @app.route('/api/control/limits', methods=['GET'])
+@requires_auth
 def get_control_limits():
     """Get safety limits for control sliders."""
     return jsonify(CONTROL_LIMITS)
 
 
 @app.route('/api/control/<device_id>/settings', methods=['GET'])
+@requires_auth
 def get_device_settings(device_id):
     """Get current device settings directly from the Bitaxe."""
     ip = get_device_ip(device_id)
@@ -599,6 +631,7 @@ def get_device_settings(device_id):
 
 
 @app.route('/api/control/<device_id>/frequency', methods=['POST'])
+@requires_auth
 def set_device_frequency(device_id):
     """Set device frequency (MHz)."""
     ip = get_device_ip(device_id)
@@ -632,6 +665,7 @@ def set_device_frequency(device_id):
 
 
 @app.route('/api/control/<device_id>/voltage', methods=['POST'])
+@requires_auth
 def set_device_voltage(device_id):
     """Set device core voltage (mV)."""
     ip = get_device_ip(device_id)
@@ -665,6 +699,7 @@ def set_device_voltage(device_id):
 
 
 @app.route('/api/control/<device_id>/fan', methods=['POST'])
+@requires_auth
 def set_device_fan(device_id):
     """Set device fan speed (%) - disables auto mode."""
     ip = get_device_ip(device_id)
@@ -698,6 +733,7 @@ def set_device_fan(device_id):
 
 
 @app.route('/api/control/<device_id>/autofan', methods=['POST'])
+@requires_auth
 def enable_device_autofan(device_id):
     """Enable auto fan mode with optional target temp and min fan speed."""
     ip = get_device_ip(device_id)
@@ -734,6 +770,7 @@ def enable_device_autofan(device_id):
 
 
 @app.route('/api/control/<device_id>/restart', methods=['POST'])
+@requires_auth
 def restart_device(device_id):
     """Restart the device."""
     ip = get_device_ip(device_id)

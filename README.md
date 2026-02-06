@@ -66,6 +66,12 @@ pip install -r requirements.txt
 Copy `config.yaml.example` to `config.yaml` and update with your Bitaxe IPs:
 
 ```yaml
+# Remote access auth (enable when using Cloudflare Tunnel)
+auth:
+  enabled: false
+  username: "admin"
+  password: "changeme"
+
 devices:
   - name: "bitaxe-1"
     ip: "192.168.1.100"
@@ -284,9 +290,91 @@ bitaxe-monitor/
 - **Temperature**: ASIC and voltage regulator temps in °C
 - **Power**: Total power consumption in watts
 
+## Remote Access (Cloudflare Tunnel)
+
+Access your dashboard from anywhere using Cloudflare Tunnel with HTTP Basic Auth.
+
+### 1. Enable Authentication
+
+Edit `config.yaml`:
+```yaml
+auth:
+  enabled: true           # Enable for remote access
+  username: "admin"
+  password: "your-secure-password"  # Change this!
+```
+
+Restart the API server after changing config.
+
+### 2. Install cloudflared
+
+**macOS:**
+```bash
+brew install cloudflared
+```
+
+**Raspberry Pi / Linux (ARM64):**
+```bash
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64 -o cloudflared
+chmod +x cloudflared
+sudo mv cloudflared /usr/local/bin/
+```
+
+**Linux (x86_64):**
+```bash
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+sudo dpkg -i cloudflared.deb
+```
+
+### 3. Start the Tunnel
+
+```bash
+cloudflared tunnel --url http://localhost:5001
+```
+
+Output will show:
+```
+Your quick Tunnel has been created! Visit it at:
+https://random-words-here.trycloudflare.com
+```
+
+This URL is publicly accessible. The browser will prompt for your username/password.
+
+### 4. Run as a Service (Optional)
+
+For persistent access on Raspberry Pi:
+
+```bash
+sudo tee /etc/systemd/system/cloudflared-tunnel.service << 'EOF'
+[Unit]
+Description=Cloudflare Tunnel
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cloudflared tunnel --url http://localhost:5001
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable cloudflared-tunnel
+sudo systemctl start cloudflared-tunnel
+
+# View the tunnel URL
+sudo journalctl -u cloudflared-tunnel | grep trycloudflare
+```
+
+**Note:** The quick tunnel URL changes on each restart. For a permanent URL, create a free Cloudflare account and set up a named tunnel.
+
+---
+
 ## Security & Privacy
 
-- Everything runs on your local network
+- Everything runs on your local network by default
+- Optional Cloudflare Tunnel for secure remote access (with Basic Auth)
 - No cloud services or external APIs (except Discord bot if enabled)
 - Database is local SQLite file
 - Only you can access your data

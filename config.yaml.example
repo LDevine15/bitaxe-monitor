@@ -1,150 +1,82 @@
 # Bitaxe Monitor Configuration
-# Copy this file to config.yaml and update with your settings
-#
-# Quick Start:
-#   1. Update device IPs below
-#   2. For Discord bot: set discord.enabled to true and configure token
-#   3. Run: python run_logger.py (data collection)
-#   4. Run: python discord_bot.py (Discord bot, optional)
+# Copy this file to config.yaml and update with your device IPs
 
-# =============================================================================
-# DEVICES - Add your Bitaxe miners here
-# =============================================================================
-# The 'group' field is optional - devices in different groups get separate charts
-# with their own Y-axis scaling. Useful when mixing different hardware types
-# (e.g., single-chip Bitaxe vs 4-chip NerdQAxe).
+# Remote access authentication (for Cloudflare Tunnel)
+auth:
+  enabled: false          # Set to true when using tunnel
+  username: "admin"
+  password: "changeme"    # Change this!
+
 devices:
   - name: "bitaxe-1"
-    ip: "192.168.1.100"           # Replace with your Bitaxe IP
+    ip: "192.168.1.100"       # Replace with your Bitaxe IP
     enabled: true
-    group: "bitaxe"               # Optional: group for chart separation
+    group: "bitaxe"           # Group for separate chart scaling
 
   - name: "bitaxe-2"
-    ip: "192.168.1.101"           # Replace with your Bitaxe IP
+    ip: "192.168.1.101"       # Replace with your Bitaxe IP
     enabled: true
     group: "bitaxe"
 
-  # Add more devices as needed:
-  # - name: "bitaxe-3"
-  #   ip: "192.168.1.102"
-  #   enabled: true
-  #   group: "bitaxe"
-
-  # NerdQAxe devices (4-chip units) - use a different group for proper scaling
+  # NerdQAxe devices (4-chip units) - separate group for chart scaling
   # - name: "nerdqaxe-1"
-  #   ip: "192.168.1.200"
+  #   ip: "192.168.1.xxx"
   #   enabled: true
   #   group: "nerdqaxe"
 
-# =============================================================================
-# DEVICE GROUPS - Power limits per hardware type (for dashboard warnings)
-# =============================================================================
-# Define power thresholds for each device group. These control:
-#   - Dashboard power bar display (% of PSU capacity)
-#   - Warning thresholds (yellow/red alerts)
-#   - Chart Y-axis scaling for power graphs
+# Power limits per device group (for dashboard warnings and chart scaling)
 device_groups:
-  bitaxe:                              # Single-chip Bitaxe (Ultra, Supra, etc.)
-    max_power: 40                      # Red warning threshold (W)
-    warn_power: 35                     # Yellow warning threshold (W)
-    psu_capacity: 40                   # PSU rated capacity for % display
-  nerdqaxe:                            # 4-chip NerdQAxe
-    max_power: 110                     # Safe sustained (~90% of PSU)
-    warn_power: 96                     # Warning threshold (~80% of PSU)
-    psu_capacity: 120                  # Stock 120W PSU
+  bitaxe:
+    max_power: 40              # Maximum safe sustained power (W)
+    warn_power: 35             # Warning threshold (W)
+    psu_capacity: 40           # PSU rated capacity (W)
+  nerdqaxe:
+    max_power: 110             # NerdQAxe safe sustained (120W PSU)
+    warn_power: 96             # Warning threshold (~80% of PSU)
+    psu_capacity: 120          # Stock PSU capacity (W)
 
-# =============================================================================
-# LOGGING - Data collection settings
-# =============================================================================
 logging:
-  poll_interval: 10               # Seconds between polls (10-30 recommended)
+  poll_interval: 10           # Seconds between polls
   database_path: "./data/metrics.db"
-  log_level: "INFO"               # DEBUG, INFO, WARNING, ERROR
+  log_level: "INFO"           # DEBUG, INFO, WARNING, ERROR
 
-# =============================================================================
-# SAFETY - Temperature and performance thresholds
-# =============================================================================
+# Dashboard configuration
+dashboard:
+  # Remote API URL - set this to fetch data from a remote server
+  # Leave empty or comment out to use local database
+  # remote_api_url: "http://raspberrypi.local:5001"
+
 safety:
-  max_temp_warning: 65            # °C - Log warning
-  max_temp_shutdown: 70           # °C - Emergency alert
-  min_hashrate_warning: 400       # GH/s - Alert if hashrate drops
+  max_temp_warning: 65         # C - Log warning
+  max_temp_shutdown: 70        # C - Emergency alert
+  min_hashrate_warning: 400    # GH/s - Alert if hashrate drops
 
-# =============================================================================
-# DISCORD BOT - Optional Discord integration
-# =============================================================================
+# Discord Bot Configuration
 discord:
-  enabled: false                  # Set to true to enable Discord bot
-  token: "${DISCORD_BOT_TOKEN}"   # Set via .env file or environment variable
-  command_prefix: "!"             # Commands: !status, !report, !miner, !health
+  enabled: false
+  token: "${DISCORD_BOT_TOKEN}"   # Reads from .env file
+  command_prefix: "!"
 
-  # Restrict bot to specific channels (leave empty for all channels)
-  allowed_channels: []
-    # - 1234567890123456789       # Uncomment and add channel IDs
-
-  # ---------------------------------------------------------------------------
-  # Auto-reporting: Posts hourly summary with charts
-  # ---------------------------------------------------------------------------
   auto_report:
     enabled: true
-    channel_name: "mining"            # For reference only
-    channel_id: 1234567890123456789   # REQUIRED: Your Discord channel ID
-    schedule: "0 * * * *"             # Cron: every hour on the hour
-    include_charts: true
-    graph_lookback_hours: 12          # Hours of data shown in charts
-    show_moving_averages: true
-    show_1h_average: true
-    show_24h_average: true
-
-  # ---------------------------------------------------------------------------
-  # Weekly report: Posts detailed 7-day summary
-  # ---------------------------------------------------------------------------
-  weekly_report:
-    enabled: true
     channel_name: "mining"
-    channel_id: 1234567890123456789   # Your Discord channel ID
-    schedule: "0 12 * * 1"            # Cron: Monday at 12:00 UTC
+    channel_id: 1234567890123456789    # Your channel ID
+    schedule: "0 * * * *"              # Every hour
     include_charts: true
-    graph_lookback_hours: 168         # 7 days
+    graph_lookback_hours: 12
 
-  # ---------------------------------------------------------------------------
-  # Alerts: Real-time notifications for issues
-  # ---------------------------------------------------------------------------
   alerts:
     enabled: true
-    channel_id: 1234567890123456789   # Channel for alerts
-    user_id_to_tag: 0                 # Discord user ID to @mention (0 = no mention)
-    check_interval_minutes: 1         # How often to check
-    offline_threshold_minutes: 2      # Minutes without data = offline
+    channel_id: 1234567890123456789
+    check_interval_minutes: 1
+    offline_threshold_minutes: 2
 
-  # ---------------------------------------------------------------------------
-  # Remote control: !restart, !clock, !voltage, !fan commands
-  # ---------------------------------------------------------------------------
   control:
     enabled: true
-    admin_role_id: 0                  # Discord role ID required (0 = everyone)
-    admin_role_name: "Miner Admin"    # Display name for help text
-    # Safety limits
-    min_frequency: 400                # MHz
-    max_frequency: 650                # MHz
-    min_voltage: 1000                 # mV
-    max_voltage: 1300                 # mV
-    min_fan_speed: 0                  # %
-    max_fan_speed: 100                # %
-
-  # ---------------------------------------------------------------------------
-  # Chart settings
-  # ---------------------------------------------------------------------------
-  charts:
-    dpi: 150                          # 72=draft, 150=good, 300=print
-    style: "dark_background"          # Matches Discord dark theme
-    figsize: [14, 7]                  # Width x Height in inches
-    cache_ttl: 300                    # Cache duration in seconds
-
-  # ---------------------------------------------------------------------------
-  # Command cooldowns (prevents spam)
-  # ---------------------------------------------------------------------------
-  commands:
-    status_cooldown: 10               # Seconds between !status per user
-    report_cooldown: 60               # Seconds between !report per user
-    report_max_hours: 336             # Max lookback: 14 days
-    miner_cooldown: 30                # Seconds between !miner per user
+    admin_role_id: 0                   # 0 = everyone can use
+    min_frequency: 400
+    max_frequency: 650
+    min_voltage: 1000
+    max_voltage: 1300
+    min_fan_speed: 0
+    max_fan_speed: 100
