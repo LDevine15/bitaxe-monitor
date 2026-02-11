@@ -786,19 +786,36 @@ def enable_device_autofan(device_id):
         return jsonify({'error': 'Device not found'}), 404
 
     data = request.get_json() or {}
-    payload = {'autofanspeed': 1}
 
-    # Optional: target temperature (0-100°C)
-    if 'temp_target' in data:
-        temp_target = int(data['temp_target'])
-        if 0 <= temp_target <= 100:
-            payload['temptarget'] = temp_target
+    # Check device firmware version to determine parameter format
+    is_nerdqaxe = False
+    try:
+        info_response = requests.get(f"http://{ip}/api/system/info", timeout=5)
+        if info_response.ok:
+            version = info_response.json().get('version', '')
+            # NerdQAxe++ uses v1.x versioning and different parameters
+            is_nerdqaxe = not version_supports_min_fan(version)
+    except requests.RequestException:
+        pass  # If we can't check, assume standard device
 
-    # Optional: minimum fan speed (0-100%)
-    if 'min_fan_speed' in data:
-        min_fan = int(data['min_fan_speed'])
-        if 0 <= min_fan <= 100:
-            payload['minFanSpeed'] = min_fan
+    if is_nerdqaxe:
+        # NerdQAxe++ uses autofanspeed: 2 and pidTargetTemp
+        payload = {'autofanspeed': 2}
+        if 'temp_target' in data:
+            temp_target = int(data['temp_target'])
+            if 0 <= temp_target <= 100:
+                payload['pidTargetTemp'] = temp_target
+    else:
+        # Standard Bitaxe uses autofanspeed: 1, temptarget, and minFanSpeed
+        payload = {'autofanspeed': 1}
+        if 'temp_target' in data:
+            temp_target = int(data['temp_target'])
+            if 0 <= temp_target <= 100:
+                payload['temptarget'] = temp_target
+        if 'min_fan_speed' in data:
+            min_fan = int(data['min_fan_speed'])
+            if 0 <= min_fan <= 100:
+                payload['minFanSpeed'] = min_fan
 
     try:
         response = requests.patch(
