@@ -620,6 +620,31 @@ def get_control_limits():
     return jsonify(CONTROL_LIMITS)
 
 
+
+def version_supports_min_fan(version: str) -> bool:
+    """Check if firmware version supports minFanSpeed parameter.
+
+    Standard Bitaxe AxeOS v2.10.0+ supports minFanSpeed.
+    NerdQAxe++ firmware (v1.x.x) does not support it.
+    """
+    if not version:
+        return False
+    # Strip leading 'v' if present
+    v = version.lstrip('v').lstrip('V')
+    # NerdQAxe++ uses 1.x.x versioning - doesn't support minFanSpeed
+    if v.startswith('1.'):
+        return False
+    # Standard Bitaxe 2.10.0+ supports it
+    try:
+        parts = v.split('.')
+        major = int(parts[0])
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        if major >= 2 and minor >= 10:
+            return True
+    except (ValueError, IndexError):
+        pass
+    return False
+
 @app.route('/api/control/<device_id>/settings', methods=['GET'])
 @requires_auth
 def get_device_settings(device_id):
@@ -633,6 +658,7 @@ def get_device_settings(device_id):
         response.raise_for_status()
         data = response.json()
 
+        version = data.get('version', '')
         return jsonify({
             'frequency': data.get('frequency', 0),
             'core_voltage': data.get('coreVoltage', 0),
@@ -641,6 +667,8 @@ def get_device_settings(device_id):
             'fan_rpm': data.get('fanrpm', 0),
             'temp_target': data.get('temptarget', 65),  # Auto fan target temp
             'min_fan_speed': data.get('minFanSpeed', 0),  # Auto fan min speed
+            'version': version,  # Firmware version
+            'supports_min_fan': version_supports_min_fan(version),  # Capability flag
         })
     except requests.RequestException as e:
         logger.error(f"Failed to get settings from {device_id}: {e}")

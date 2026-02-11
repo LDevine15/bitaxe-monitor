@@ -9,6 +9,7 @@ let controlLimits = {
     min_fan_speed: 0, max_fan_speed: 100
 };
 let fanMode = 'auto';
+let supportsMinFan = true;  // Track if device supports min fan speed
 
 // =================================================================
 // Initialization
@@ -111,6 +112,15 @@ async function openControlModal(miner) {
 
 function setControlValues(settings) {
     const { frequency, core_voltage, fan_speed, autofan, temp_target, min_fan_speed } = settings;
+
+    // Check if device supports min fan speed
+    supportsMinFan = settings.supports_min_fan !== false;
+
+    // Show/hide min fan speed control based on device capability
+    const minFanGroup = document.getElementById('minFanGroup');
+    if (minFanGroup) {
+        minFanGroup.style.display = supportsMinFan ? 'flex' : 'none';
+    }
 
     // Current settings display
     document.getElementById('currentFreq').textContent = frequency + ' MHz';
@@ -244,13 +254,18 @@ async function applyFan() {
 
     if (fanMode === 'auto') {
         const temp_target = parseInt(document.getElementById('tempTargetInput').value);
-        const min_fan_speed = parseInt(document.getElementById('minFanInput').value);
+        const payload = { temp_target };
+
+        // Only include min_fan_speed if device supports it
+        if (supportsMinFan) {
+            payload.min_fan_speed = parseInt(document.getElementById('minFanInput').value);
+        }
 
         try {
             const response = await fetch(`/api/control/${selectedMiner.name}/autofan`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ temp_target, min_fan_speed })
+                body: JSON.stringify(payload)
             });
             const data = await response.json();
             if (response.ok) {
