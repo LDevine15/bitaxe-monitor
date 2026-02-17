@@ -425,7 +425,7 @@ async function loadSelectedProfile() {
 
 async function saveCurrentAsProfile() {
     if (!selectedMiner) return;
-    const name = prompt('Profile name (alphanumeric, spaces, dashes, max 30 chars):');
+    const name = prompt('Profile name (letters, numbers, spaces, periods, dashes — max 30 chars):');
     if (!name || !name.trim()) return;
 
     const profileData = {

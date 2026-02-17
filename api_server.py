@@ -859,7 +859,7 @@ def restart_device(device_id):
 # =============================================================================
 
 PROFILES_PATH = os.path.join('data', 'profiles.json')
-PROFILE_NAME_RE = re.compile(r'^[a-zA-Z0-9 \-]{1,30}$')
+PROFILE_NAME_RE = re.compile(r'^[a-zA-Z0-9 .\-]{1,30}$')
 
 
 def _load_profiles():
@@ -924,7 +924,7 @@ def save_profile(device_id):
     data = request.get_json()
     name = (data.get('name') or '').strip()
     if not name or not PROFILE_NAME_RE.match(name):
-        return jsonify({'error': 'Invalid profile name (alphanumeric, spaces, dashes, max 30 chars)'}), 400
+        return jsonify({'error': 'Invalid profile name (letters, numbers, spaces, periods, dashes, max 30 chars)'}), 400
 
     cleaned, error = _validate_profile_settings(data)
     if error:
