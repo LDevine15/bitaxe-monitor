@@ -10,6 +10,7 @@ let controlLimits = {
 };
 let fanMode = 'auto';
 let supportsMinFan = true;  // Track if device supports min fan speed
+let deviceProfiles = [];    // Profiles for currently open device
 
 // =================================================================
 // Initialization
@@ -108,6 +109,9 @@ async function openControlModal(miner) {
     } catch (e) {
         console.error('Failed to fetch live settings:', e);
     }
+
+    // Load saved profiles for this device
+    loadProfiles(miner.name);
 }
 
 function setControlValues(settings) {
@@ -318,6 +322,162 @@ async function restartMiner() {
             setTimeout(closeModal, 1500);
         } else {
             showStatus(data.error || 'Failed to restart', true);
+        }
+    } catch (e) {
+        showStatus('Connection error', true);
+    }
+}
+
+// =================================================================
+// Device Profiles
+// =================================================================
+
+async function loadProfiles(deviceId) {
+    try {
+        const response = await fetch(`/api/profiles/${deviceId}`);
+        if (response.ok) {
+            deviceProfiles = await response.json();
+        } else {
+            deviceProfiles = [];
+        }
+    } catch (e) {
+        deviceProfiles = [];
+    }
+    populateProfileDropdown();
+}
+
+function populateProfileDropdown() {
+    const select = document.getElementById('profileSelect');
+    select.innerHTML = '';
+    if (deviceProfiles.length === 0) {
+        select.innerHTML = '<option value="">-- No profiles --</option>';
+        return;
+    }
+    select.innerHTML = '<option value="">Select profile...</option>';
+    deviceProfiles.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+    });
+}
+
+function selectProfile(name) {
+    const profile = deviceProfiles.find(p => p.name === name);
+    if (!profile) return;
+
+    document.getElementById('freqSlider').value = profile.frequency;
+    document.getElementById('freqInput').value = profile.frequency;
+    document.getElementById('voltageSlider').value = profile.core_voltage;
+    document.getElementById('voltageInput').value = profile.core_voltage;
+
+    if (profile.fan_mode === 'auto') {
+        setFanMode('auto');
+        document.getElementById('tempTargetSlider').value = profile.temp_target || 65;
+        document.getElementById('tempTargetInput').value = profile.temp_target || 65;
+        document.getElementById('minFanSlider').value = profile.min_fan_speed || 0;
+        document.getElementById('minFanInput').value = profile.min_fan_speed || 0;
+    } else {
+        setFanMode('manual');
+        document.getElementById('fanSlider').value = profile.fan_speed || 100;
+        document.getElementById('fanInput').value = profile.fan_speed || 100;
+    }
+}
+
+async function loadSelectedProfile() {
+    if (!selectedMiner) return;
+    const select = document.getElementById('profileSelect');
+    const name = select.value;
+    if (!name) {
+        showStatus('Select a profile first', true);
+        return;
+    }
+
+    // Populate sliders from the profile
+    selectProfile(name);
+
+    // Apply to device
+    try {
+        const response = await fetch(`/api/profiles/${selectedMiner.name}/${encodeURIComponent(name)}/apply`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showStatus(`Profile "${name}" applied`);
+            // Update current settings display
+            const profile = deviceProfiles.find(p => p.name === name);
+            if (profile) {
+                document.getElementById('currentFreq').textContent = profile.frequency + ' MHz';
+                document.getElementById('currentVoltage').textContent = profile.core_voltage + ' mV';
+                if (profile.fan_mode === 'auto') {
+                    document.getElementById('currentFan').textContent = `Auto (${profile.temp_target}°C)`;
+                } else {
+                    document.getElementById('currentFan').textContent = profile.fan_speed + '%';
+                }
+            }
+        } else {
+            showStatus(data.error || 'Failed to apply profile', true);
+        }
+    } catch (e) {
+        showStatus('Connection error', true);
+    }
+}
+
+async function saveCurrentAsProfile() {
+    if (!selectedMiner) return;
+    const name = prompt('Profile name (alphanumeric, spaces, dashes, max 30 chars):');
+    if (!name || !name.trim()) return;
+
+    const profileData = {
+        name: name.trim(),
+        frequency: parseInt(document.getElementById('freqInput').value),
+        core_voltage: parseInt(document.getElementById('voltageInput').value),
+        fan_mode: fanMode,
+        fan_speed: parseInt(document.getElementById('fanInput').value),
+        temp_target: parseInt(document.getElementById('tempTargetInput').value),
+        min_fan_speed: parseInt(document.getElementById('minFanInput').value),
+    };
+
+    try {
+        const response = await fetch(`/api/profiles/${selectedMiner.name}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profileData)
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showStatus(`Profile "${name.trim()}" saved`);
+            await loadProfiles(selectedMiner.name);
+            // Select the newly saved profile
+            document.getElementById('profileSelect').value = name.trim();
+        } else {
+            showStatus(data.error || 'Failed to save profile', true);
+        }
+    } catch (e) {
+        showStatus('Connection error', true);
+    }
+}
+
+async function deleteSelectedProfile() {
+    if (!selectedMiner) return;
+    const select = document.getElementById('profileSelect');
+    const name = select.value;
+    if (!name) {
+        showStatus('Select a profile first', true);
+        return;
+    }
+    if (!confirm(`Delete profile "${name}"?`)) return;
+
+    try {
+        const response = await fetch(`/api/profiles/${selectedMiner.name}/${encodeURIComponent(name)}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        if (response.ok) {
+            showStatus(`Profile "${name}" deleted`);
+            await loadProfiles(selectedMiner.name);
+        } else {
+            showStatus(data.error || 'Failed to delete profile', true);
         }
     } catch (e) {
         showStatus('Connection error', true);

@@ -80,6 +80,15 @@
                 <button class="modal-close" onclick="closeModal()">&times;</button>
             </div>
 
+            <div class="profile-bar">
+                <select id="profileSelect" class="profile-select">
+                    <option value="">-- No profiles --</option>
+                </select>
+                <button class="control-btn primary profile-btn" onclick="loadSelectedProfile()">Load</button>
+                <button class="control-btn profile-btn" onclick="saveCurrentAsProfile()">Save</button>
+                <button class="control-btn danger profile-btn" onclick="deleteSelectedProfile()">Delete</button>
+            </div>
+
             <div class="status-message" id="statusMessage"></div>
 
             <div class="current-settings" id="currentSettings">

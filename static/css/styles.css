@@ -320,6 +320,33 @@ h1 {
     color: var(--text-primary);
 }
 
+/* Profile bar */
+.profile-bar {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+
+.profile-select {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    font-size: 13px;
+}
+
+.profile-btn {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+}
+
 /* Control groups */
 .control-group {
     margin-bottom: 20px;

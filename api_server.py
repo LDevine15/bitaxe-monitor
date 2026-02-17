@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Flask API server for ESP32 display and web dashboard."""
 
+import json
 import logging
 import os
+import re
 from datetime import datetime
 from functools import wraps
 from flask import Flask, jsonify, send_from_directory, request, Response
@@ -850,6 +852,178 @@ def restart_device(device_id):
     except requests.RequestException as e:
         logger.error(f"Failed to restart {device_id}: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+# =============================================================================
+# Device Profiles (Presets)
+# =============================================================================
+
+PROFILES_PATH = os.path.join('data', 'profiles.json')
+PROFILE_NAME_RE = re.compile(r'^[a-zA-Z0-9 \-]{1,30}$')
+
+
+def _load_profiles():
+    """Load all profiles from disk."""
+    if not os.path.exists(PROFILES_PATH):
+        return {}
+    with open(PROFILES_PATH, 'r') as fh:
+        return json.load(fh)
+
+
+def _save_profiles(profiles):
+    """Write profiles dict to disk."""
+    os.makedirs(os.path.dirname(PROFILES_PATH), exist_ok=True)
+    with open(PROFILES_PATH, 'w') as fh:
+        json.dump(profiles, fh, indent=2)
+
+
+def _validate_profile_settings(data):
+    """Validate profile settings against CONTROL_LIMITS. Returns (cleaned, error)."""
+    required = ['frequency', 'core_voltage', 'fan_mode']
+    for key in required:
+        if key not in data:
+            return None, f'{key} is required'
+
+    frequency = int(data['frequency'])
+    core_voltage = int(data['core_voltage'])
+    fan_mode = data['fan_mode']
+
+    if not CONTROL_LIMITS['min_frequency'] <= frequency <= CONTROL_LIMITS['max_frequency']:
+        return None, f"Frequency must be between {CONTROL_LIMITS['min_frequency']}-{CONTROL_LIMITS['max_frequency']} MHz"
+    if not CONTROL_LIMITS['min_voltage'] <= core_voltage <= CONTROL_LIMITS['max_voltage']:
+        return None, f"Voltage must be between {CONTROL_LIMITS['min_voltage']}-{CONTROL_LIMITS['max_voltage']} mV"
+    if fan_mode not in ('auto', 'manual'):
+        return None, 'fan_mode must be "auto" or "manual"'
+
+    cleaned = {
+        'frequency': frequency,
+        'core_voltage': core_voltage,
+        'fan_mode': fan_mode,
+        'fan_speed': int(data.get('fan_speed', 100)),
+        'temp_target': int(data.get('temp_target', 65)),
+        'min_fan_speed': int(data.get('min_fan_speed', 0)),
+    }
+    return cleaned, None
+
+
+@app.route('/api/profiles/<device_id>', methods=['GET'])
+@requires_auth
+def get_profiles(device_id):
+    """Return saved profiles for a device."""
+    profiles = _load_profiles()
+    return jsonify(profiles.get(device_id, []))
+
+
+@app.route('/api/profiles/<device_id>', methods=['POST'])
+@requires_auth
+def save_profile(device_id):
+    """Save or overwrite a profile for a device."""
+    if not get_device_ip(device_id):
+        return jsonify({'error': 'Device not found'}), 404
+
+    data = request.get_json()
+    name = (data.get('name') or '').strip()
+    if not name or not PROFILE_NAME_RE.match(name):
+        return jsonify({'error': 'Invalid profile name (alphanumeric, spaces, dashes, max 30 chars)'}), 400
+
+    cleaned, error = _validate_profile_settings(data)
+    if error:
+        return jsonify({'error': error}), 400
+
+    cleaned['name'] = name
+    profiles = _load_profiles()
+    device_profiles = profiles.get(device_id, [])
+
+    # Overwrite if same name exists
+    device_profiles = [p for p in device_profiles if p['name'] != name]
+    device_profiles.append(cleaned)
+    profiles[device_id] = device_profiles
+    _save_profiles(profiles)
+
+    logger.info(f"Saved profile '{name}' for {device_id}")
+    return jsonify({'success': True, 'profile': cleaned})
+
+
+@app.route('/api/profiles/<device_id>/<profile_name>', methods=['DELETE'])
+@requires_auth
+def delete_profile(device_id, profile_name):
+    """Delete a saved profile."""
+    profiles = _load_profiles()
+    device_profiles = profiles.get(device_id, [])
+    before = len(device_profiles)
+    device_profiles = [p for p in device_profiles if p['name'] != profile_name]
+
+    if len(device_profiles) == before:
+        return jsonify({'error': 'Profile not found'}), 404
+
+    profiles[device_id] = device_profiles
+    _save_profiles(profiles)
+    logger.info(f"Deleted profile '{profile_name}' from {device_id}")
+    return jsonify({'success': True})
+
+
+@app.route('/api/profiles/<device_id>/<profile_name>/apply', methods=['POST'])
+@requires_auth
+def apply_profile(device_id, profile_name):
+    """Apply a saved profile to a device."""
+    ip = get_device_ip(device_id)
+    if not ip:
+        return jsonify({'error': 'Device not found'}), 404
+
+    profiles = _load_profiles()
+    device_profiles = profiles.get(device_id, [])
+    profile = next((p for p in device_profiles if p['name'] == profile_name), None)
+    if not profile:
+        return jsonify({'error': 'Profile not found'}), 404
+
+    errors = []
+
+    # 1. Apply frequency + voltage together
+    try:
+        response = requests.patch(
+            f"http://{ip}/api/system",
+            json={'frequency': profile['frequency'], 'coreVoltage': profile['core_voltage']},
+            timeout=5
+        )
+        response.raise_for_status()
+    except requests.RequestException as e:
+        errors.append(f"frequency/voltage: {e}")
+
+    # 2. Apply fan settings
+    try:
+        if profile['fan_mode'] == 'auto':
+            # Check device type for autofan parameter format
+            is_nerdqaxe = False
+            try:
+                info_response = requests.get(f"http://{ip}/api/system/info", timeout=5)
+                if info_response.ok:
+                    version = info_response.json().get('version', '')
+                    is_nerdqaxe = not version_supports_min_fan(version)
+            except requests.RequestException:
+                pass
+
+            if is_nerdqaxe:
+                payload = {'autofanspeed': 2, 'pidTargetTemp': profile['temp_target']}
+            else:
+                payload = {
+                    'autofanspeed': 1,
+                    'temptarget': profile['temp_target'],
+                    'minFanSpeed': profile['min_fan_speed'],
+                }
+        else:
+            payload = {'autofanspeed': 0, 'manualFanSpeed': profile['fan_speed']}
+
+        response = requests.patch(f"http://{ip}/api/system", json=payload, timeout=5)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        errors.append(f"fan: {e}")
+
+    if errors:
+        logger.error(f"Errors applying profile '{profile_name}' to {device_id}: {errors}")
+        return jsonify({'error': f"Partial failure: {'; '.join(errors)}"}), 500
+
+    logger.info(f"Applied profile '{profile_name}' to {device_id}")
+    return jsonify({'success': True, 'profile': profile})
 
 
 if __name__ == '__main__':
